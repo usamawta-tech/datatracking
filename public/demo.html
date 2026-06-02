@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>John Carter — Portfolio</title>
+  <script>
+(function(w,d){
+'use strict';
+var KEY="cmpmufbgo0002v4tpkwyp7nz7";
+var API="/api/collect";
+function getId(k,prefix){
+  try{var v=localStorage.getItem(k);if(!v){v=prefix+'_'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}
+  catch(e){return prefix+'_'+Math.random().toString(36).slice(2);}
+}
+var DISTINCT_ID=getId('_ait_uid','usr');
+var SESSION_ID=getId('_ait_sid','ses');
+w.dataLayer=w.dataLayer||[];
+function send(eventName,props){
+  var data=Object.assign({event:eventName,page:w.location.pathname,page_title:d.title,page_url:w.location.href,referrer:d.referrer||'',distinct_id:DISTINCT_ID,session_id:SESSION_ID,timestamp:Date.now()},props);
+  w.dataLayer.push(Object.assign({},data));
+  var payload=JSON.stringify(Object.assign({key:KEY},data));
+  try{
+    if(navigator.sendBeacon){navigator.sendBeacon(API,new Blob([payload],{type:'application/json'}));}
+    else{fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true});}
+  }catch(e){}
+}
+send('page_view',{});
+var KW={purchase:/\b(complete purchase|finish purchase|pay now|submit order|confirm payment|buy now)\b/i,checkout:/\b(checkout|proceed to checkout|go to checkout|start checkout|place order|review order)\b/i,signup:/\b(sign up|signup|create account|get started|join free|register|try free|start free)\b/i,login:/\b(sign in|login|log in|continue with|access account)\b/i};
+function classifyText(text,id,cls){var s=(text+' '+id+' '+cls).toLowerCase();if(KW.purchase.test(s))return 'purchase';if(KW.checkout.test(s))return 'checkout_started';if(KW.signup.test(s))return 'signup';if(KW.login.test(s))return 'login';return null;}
+d.addEventListener('click',function(e){
+  var el=e.target.closest('button,[type="button"],[type="submit"],a[href],[role="button"]');if(!el)return;
+  var text=(el.innerText||el.value||el.getAttribute('aria-label')||'').trim().slice(0,120);
+  var id=el.id||'';var cls=(el.className||'').toString().slice(0,100);var href=el.href||'';
+  send(classifyText(text,id,cls)||'button_click',{button_text:text||undefined,button_id:id||undefined,href:href||undefined});
+},true);
+d.addEventListener('submit',function(e){
+  var form=e.target;var hasPwd=!!form.querySelector('[type="password"]');var hasEmail=!!form.querySelector('[type="email"],[name*="email"]');
+  var fid=(form.id||form.name||'').toLowerCase();
+  var eventName='form_submit';if(hasPwd&&hasEmail){eventName=/signup|register|join|create/.test(fid)?'signup':'login';}
+  send(eventName,{form_id:form.id||undefined});
+},true);
+var scrollSent={};
+w.addEventListener('scroll',function(){
+  var pct=Math.round((w.scrollY+w.innerHeight)/Math.max(d.documentElement.scrollHeight,1)*100);
+  [25,50,75,100].forEach(function(mark){if(!scrollSent[mark]&&pct>=mark){scrollSent[mark]=true;send('scroll_depth',{scroll_percent:mark});}});
+},{passive:true});
+})(window,document);
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; color: #111; }
+    nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid #eee; }
+    nav a { text-decoration: none; color: #555; margin-left: 24px; font-size: 14px; }
+    nav a.btn { background: #111; color: #fff; padding: 8px 18px; border-radius: 6px; }
+    .hero { padding: 80px 40px; max-width: 800px; }
+    .hero h1 { font-size: 48px; line-height: 1.2; margin-bottom: 16px; }
+    .hero p { color: #666; font-size: 18px; margin-bottom: 32px; }
+    .hero .btns { display: flex; gap: 12px; }
+    .hero .btns a { padding: 12px 24px; border-radius: 8px; font-size: 15px; text-decoration: none; cursor: pointer; }
+    .hero .btns a.primary { background: #111; color: #fff; }
+    .hero .btns a.secondary { border: 1px solid #ccc; color: #333; }
+    section { padding: 60px 40px; }
+    section.gray { background: #f9f9f9; }
+    h2 { font-size: 28px; margin-bottom: 32px; }
+    .projects { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .card { border: 1px solid #e5e5e5; border-radius: 12px; overflow: hidden; }
+    .card .thumb { height: 120px; background: #e8f0fe; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+    .card .body { padding: 16px; }
+    .card h3 { font-size: 15px; margin-bottom: 6px; }
+    .card p { font-size: 13px; color: #666; margin-bottom: 12px; }
+    .card .actions { display: flex; gap: 12px; }
+    .card .actions button { font-size: 12px; color: #2563eb; background: none; border: none; cursor: pointer; }
+    form { display: flex; flex-direction: column; gap: 12px; max-width: 480px; }
+    form input, form textarea { padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; font-family: inherit; }
+    form button { padding: 12px; background: #111; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+    footer { padding: 24px 40px; border-top: 1px solid #eee; font-size: 13px; color: #999; display: flex; justify-content: space-between; }
+    footer a { color: #999; text-decoration: none; margin-left: 16px; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <strong>John Carter</strong>
+    <div>
+      <a href="#about">About</a>
+      <a href="#projects">Projects</a>
+      <a href="#contact">Contact</a>
+      <a href="#contact" class="btn">Hire Me</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <p style="color:#2563eb;font-size:13px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px;">Full Stack Developer</p>
+    <h1>Hi, I'm John.<br>I build things for the web.</h1>
+    <p>Developer based in New York building clean, fast web apps.</p>
+    <div class="btns">
+      <a href="#projects" class="primary">View My Work</a>
+      <a href="#contact" class="secondary">Get In Touch</a>
+    </div>
+  </div>
+
+  <section id="about" class="gray">
+    <h2>About Me</h2>
+    <p style="color:#555;max-width:600px;line-height:1.7;">5 years building web apps with React, Next.js and Node.js. I care about performance, accessibility, and clean code.</p>
+    <button onclick="void 0" style="margin-top:20px;background:none;border:1px solid #ccc;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;">Download Resume</button>
+  </section>
+
+  <section id="projects">
+    <h2>Projects</h2>
+    <div class="projects">
+      <div class="card">
+        <div class="thumb">💻</div>
+        <div class="body">
+          <h3>Task Manager App</h3>
+          <p>Full-stack productivity app with real-time collaboration.</p>
+          <div class="actions">
+            <button>Live Demo</button>
+            <button>GitHub</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="thumb" style="background:#f3e8ff;">📝</div>
+        <div class="body">
+          <h3>Dev Blog Platform</h3>
+          <p>Markdown-powered blog with syntax highlighting.</p>
+          <div class="actions">
+            <button>Live Demo</button>
+            <button>GitHub</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="thumb" style="background:#dcfce7;">🌤️</div>
+        <div class="body">
+          <h3>Weather Dashboard</h3>
+          <p>Clean weather app with charts and 7-day forecast.</p>
+          <div class="actions">
+            <button>Live Demo</button>
+            <button>GitHub</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="contact" class="gray">
+    <h2>Get In Touch</h2>
+    <form id="contact-form" onsubmit="return false;">
+      <input type="text" placeholder="Your name" />
+      <input type="email" name="email" placeholder="you@example.com" />
+      <textarea rows="4" placeholder="Tell me about your project..."></textarea>
+      <button type="submit">Send Message</button>
+    </form>
+  </section>
+
+  <footer>
+    <span>John Carter © 2026</span>
+    <div>
+      <a href="#">GitHub</a>
+      <a href="#">LinkedIn</a>
+      <a href="#">Twitter</a>
+    </div>
+  </footer>
+
+</body>
+</html>

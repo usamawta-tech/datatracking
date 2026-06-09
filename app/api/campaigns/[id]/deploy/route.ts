@@ -61,7 +61,16 @@ export async function POST(
     return NextResponse.json({ success: true, tags: result.tags });
   } catch (e) {
     console.error("[campaigns/deploy]", e);
-    const msg = e instanceof Error ? e.message : "Deployment failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    // Pull the real GTM API message out of the GaxiosError wrapper
+    const apiMsg = (() => {
+      if (e && typeof e === "object") {
+        const data = ((e as Record<string,unknown>).response as Record<string,unknown> | undefined)?.data as Record<string,unknown> | undefined;
+        const nested = data?.error as Record<string,unknown> | undefined;
+        if (typeof nested?.message === "string") return nested.message;
+      }
+      return e instanceof Error ? e.message : "Deployment failed";
+    })();
+    const status = /workspace|submitted|GTM/i.test(apiMsg) ? 422 : 500;
+    return NextResponse.json({ error: apiMsg }, { status });
   }
 }

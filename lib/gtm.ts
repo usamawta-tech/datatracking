@@ -60,6 +60,24 @@ export async function getValidAccessToken(conn: {
   return conn.accessToken;
 }
 
+// Extracts the real error message from a googleapis GaxiosError.
+// err.message is always "Request failed with status code XXX" — the actual
+// GTM reason lives in err.response.data.error.message.
+function gtmErrMsg(err: unknown): string {
+  if (err && typeof err === "object") {
+    const e = err as Record<string, unknown>;
+    const apiMsg =
+      (e.response as Record<string, unknown> | undefined)
+        ?.data as Record<string, unknown> | undefined;
+    const nested = apiMsg?.error as Record<string, unknown> | undefined;
+    if (nested?.message && typeof nested.message === "string") {
+      return nested.message.toLowerCase();
+    }
+    if (e.message && typeof e.message === "string") return e.message.toLowerCase();
+  }
+  return String(err).toLowerCase();
+}
+
 export function getTagManagerClient(accessToken: string, refreshToken?: string | null) {
   const client = createOAuth2Client();
   client.setCredentials({
@@ -96,13 +114,14 @@ export async function listWorkspaces(accountId: string, containerId: string, acc
 export async function activateMixpanelTracking(
   accountId: string,
   containerId: string,
-  workspaceId: string,
+  _workspaceId: string,
   mixpanelToken: string,
   accessToken: string,
   refreshToken?: string | null
 ): Promise<{ tagsCreated: string[] }> {
   const tm = getTagManagerClient(accessToken, refreshToken);
-  const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
+  const freshId = await makeFreshWorkspace(tm, accountId, containerId);
+  const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${freshId}`;
   const created: string[] = [];
 
   // ── 1. Triggers ─────────────────────────────────────────────────────────────
@@ -138,8 +157,8 @@ export async function activateMixpanelTracking(
   // ── 2. Mixpanel Init tag (All Pages, once per page) ─────────────────────────
   const initHtml = `<script>
 /* Mixpanel SDK stub — queues calls until SDK loads */
-(function(f,b){if(!b.__SV){var e,g,i,h;window.mixpanel=b;b._i=[];b.init=function(e,f,c){function g(a,d){var b=d.split(".");2==b.length&&(a=a[b[0]],d=b[1]);a[d]=function(){a.push([d].concat(Array.prototype.slice.call(arguments,0)))}}var a=b;"undefined"!==typeof c?a=b[c]=[]:c="mixpanel";a.people=a.people||[];a.toString=function(a){var d="mixpanel";"mixpanel"!==c&&(d+="."+c);a||(d+=" (stub)");return d};a.people.toString=function(){return a.toString(1)+".people (stub)"};i="disable time_event track track_pageview track_links track_forms register register_once unregister identify name_tag set_config reset people.set people.set_once people.increment people.append people.union people.track_charge people.clear_charges people.delete_user".split(" ");for(h=0;h<i.length;h++)g(a,i[h]);b._i.push([e,f,c])};b.__SV=1.1}f&&f.getElementById("_mp_s")||(e=f.createElement("script"),e.id="_mp_s",e.type="text/javascript",e.async=!0,e.src="https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js",g=f.getElementsByTagName("script")[0],g.parentNode.insertBefore(e,g))})(document,window.mixpanel||[]);
-mixpanel.init(${JSON.stringify(mixpanelToken)},{track_pageview:false,persistence:"localStorage"});
+(function(f,b){if(!b.__SV){var e,g,i,h;window.mixpanel=b;b._i=[];b.init=function(e,f,c){function g(a,d){var b=d.split(".");2==b.length&&(a=a[b[0]],d=b[1]);a[d]=function(){a.push([d].concat(Array.prototype.slice.call(arguments,0)))}}var a=b;"undefined"!==typeof c?a=b[c]=[]:c="mixpanel";a.people=a.people||[];a.toString=function(a){var d="mixpanel";"mixpanel"!==c&&(d+="."+c);a||(d+=" (stub)");return d};a.people.toString=function(){return a.toString(1)+".people (stub)"};i="disable time_event track track_pageview track_links track_forms register register_once unregister identify name_tag set_config reset people.set people.set_once people.increment people.append people.union people.track_charge people.clear_charges people.delete_user".split(" ");for(h=0;h<i.length;h++)g(a,i[h]);b._i.push([e,f,c])};b.__SV=1.1}f&&f.getElementById("_mp_s")||(e=f.createElement("script"),e.id="_mp_s",e.type="text/javascript",e.async=!0,e.src="https://cdn.mixpanel.com/libs/mixpanel-2-latest.min.js",g=f.getElementsByTagName("script")[0],g.parentNode.insertBefore(e,g))})(document,window.mixpanel||[]);
+mixpanel.init(${JSON.stringify(mixpanelToken)},{track_pageview:false,persistence:"localStorage",loaded:function(){window._mpReady=true;}});
 
 /* Capture last-clicked element so click tags can read it */
 window._mpClick=null;
@@ -174,9 +193,7 @@ document.addEventListener("submit",function(e){
       name: "MP - Page View",
       type: "html",
       parameter: [{ type: "TEMPLATE", key: "html", value: `<script>
-if(typeof mixpanel!=="undefined"){
-  mixpanel.track("page_view",{page:window.location.pathname,title:document.title,url:window.location.href,referrer:document.referrer});
-}
+(function(){var t=0;(function w(){if(window._mpReady&&window.mixpanel){mixpanel.track("page_view",{page:window.location.pathname,title:document.title,url:window.location.href,referrer:document.referrer});}else if(++t<30){setTimeout(w,100);}})();})();
 <\/script>` }],
       firingTriggerId: [allPagesTrigId],
       setupTag,
@@ -191,11 +208,7 @@ if(typeof mixpanel!=="undefined"){
       name: "MP - Button Click",
       type: "html",
       parameter: [{ type: "TEMPLATE", key: "html", value: `<script>
-if(typeof mixpanel!=="undefined"&&window._mpClick){
-  var c=window._mpClick;
-  var ev=c.text&&/(buy|purchase|checkout|order)/i.test(c.text)?"checkout_started":c.text&&/(sign up|signup|register|join)/i.test(c.text)?"signup":c.text&&/(sign in|login|log in)/i.test(c.text)?"login":"button_click";
-  mixpanel.track(ev,{page:window.location.pathname,button_text:c.text,element_id:c.id,element_tag:c.tag,href:c.href});
-}
+(function(){var t=0;(function w(){if(window._mpReady&&window.mixpanel&&window._mpClick){var c=window._mpClick;var ev=c.text&&/(buy|purchase|checkout|order)/i.test(c.text)?"checkout_started":c.text&&/(sign up|signup|register|join)/i.test(c.text)?"signup":c.text&&/(sign in|login|log in)/i.test(c.text)?"login":"button_click";mixpanel.track(ev,{page:window.location.pathname,button_text:c.text,element_id:c.id,element_tag:c.tag,href:c.href});}else if(++t<30){setTimeout(w,100);}})();})();
 <\/script>` }],
       firingTriggerId: [clickTrigId],
       setupTag,
@@ -210,11 +223,7 @@ if(typeof mixpanel!=="undefined"&&window._mpClick){
       name: "MP - Form Submit",
       type: "html",
       parameter: [{ type: "TEMPLATE", key: "html", value: `<script>
-if(typeof mixpanel!=="undefined"&&window._mpForm){
-  var f=window._mpForm;
-  var ev=/(login|signin)/i.test(f.id+f.action)?"login":/(signup|register|join)/i.test(f.id+f.action)?"signup":"form_submit";
-  mixpanel.track(ev,{page:window.location.pathname,form_id:f.id,form_action:f.action});
-}
+(function(){var t=0;(function w(){if(window._mpReady&&window.mixpanel&&window._mpForm){var f=window._mpForm;var ev=/(login|signin)/i.test(f.id+f.action)?"login":/(signup|register|join)/i.test(f.id+f.action)?"signup":"form_submit";mixpanel.track(ev,{page:window.location.pathname,form_id:f.id,form_action:f.action});}else if(++t<30){setTimeout(w,100);}})();})();
 <\/script>` }],
       firingTriggerId: [formTrigId],
       setupTag,
@@ -223,7 +232,7 @@ if(typeof mixpanel!=="undefined"&&window._mpForm){
   created.push("MP - Form Submit");
 
   // ── 6. Publish workspace ──────────────────────────────────────────────────────
-  await publishWorkspace(accountId, containerId, workspaceId, accessToken, refreshToken);
+  await publishWorkspace(accountId, containerId, freshId, accessToken, refreshToken);
 
   void initRes; // suppress unused warning
   return { tagsCreated: created };
@@ -303,6 +312,45 @@ export async function createEventTagInGTM(
   };
 }
 
+// Creates a clean temporary workspace for each deploy.
+// GTM auto-deletes the workspace when create_version is called, so there is no leak.
+async function makeFreshWorkspace(
+  tm: ReturnType<typeof getTagManagerClient>,
+  accountId: string,
+  containerId: string
+): Promise<string> {
+  const containerParent = `accounts/${accountId}/containers/${containerId}`;
+
+  // Delete any leftover ait-deploy-* workspaces from previously failed deploys.
+  try {
+    const list = await tm.accounts.containers.workspaces.list({ parent: containerParent });
+    const stale = (list.data.workspace ?? []).filter(
+      (w) => w.name?.startsWith("ait-deploy-") && w.workspaceId
+    );
+    await Promise.allSettled(
+      stale.map((w) =>
+        tm.accounts.containers.workspaces.delete({
+          path: `${containerParent}/workspaces/${w.workspaceId}`,
+        })
+      )
+    );
+  } catch {
+    // non-fatal — proceed even if cleanup fails
+  }
+
+  const res = await tm.accounts.containers.workspaces.create({
+    parent: containerParent,
+    requestBody: {
+      name: `ait-deploy-${Date.now()}`,
+      description: "Temporary workspace created by AI Tracker. Safe to delete.",
+    },
+  });
+
+  const id = res.data.workspaceId;
+  if (!id) throw new Error("GTM: could not create a fresh deployment workspace");
+  return id;
+}
+
 export async function publishWorkspace(
   accountId: string,
   containerId: string,
@@ -310,22 +358,20 @@ export async function publishWorkspace(
   accessToken: string,
   refreshToken?: string | null
 ) {
-  const tagmanager = getTagManagerClient(accessToken, refreshToken);
-  const workspacePath = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
+  const tm = getTagManagerClient(accessToken, refreshToken);
+  const path = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
 
-  // Create a container version from the workspace
-  const versionRes = await tagmanager.accounts.containers.workspaces.create_version({
-    path: workspacePath,
+  const versionRes = await tm.accounts.containers.workspaces.create_version({
+    path,
     requestBody: {
-      name: `Auto-published ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
+      name: `AI Tracker ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
     },
   });
 
   const versionId = versionRes.data.containerVersion?.containerVersionId;
   if (!versionId) throw new Error("GTM: failed to create container version");
 
-  // Publish the version
-  await tagmanager.accounts.containers.versions.publish({
+  await tm.accounts.containers.versions.publish({
     path: `accounts/${accountId}/containers/${containerId}/versions/${versionId}`,
   });
 
@@ -369,7 +415,7 @@ export interface PlatformTagConfig {
 export async function deployCampaignTags(
   accountId: string,
   containerId: string,
-  workspaceId: string,
+  _workspaceId: string,
   campaignName: string,
   triggerPath: string,
   platformTags: PlatformTagConfig[],
@@ -377,7 +423,10 @@ export async function deployCampaignTags(
   refreshToken?: string | null
 ): Promise<{ triggerId: string; tags: Array<{ platform: TagPlatform; gtmTagId: string; name: string }> }> {
   const tm = getTagManagerClient(accessToken, refreshToken);
-  const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
+
+  // Always use a fresh workspace to avoid "workspace already submitted" errors.
+  const freshId = await makeFreshWorkspace(tm, accountId, containerId);
+  const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${freshId}`;
 
   // Create one page view trigger with CONTAINS filter on {{Page Path}}
   const triggerRes = await tm.accounts.containers.workspaces.triggers.create({
@@ -415,10 +464,22 @@ fbq('init', ${JSON.stringify(pt.tagId)});
 fbq('track', ${JSON.stringify(pt.eventName)});
 <\/script>`;
     } else if (pt.platform === "mixpanel") {
+      // Use Mixpanel HTTP Ingestion API directly via sendBeacon — no SDK loading,
+      // no CDN dependency, no async timing issues. Fires synchronously when GTM tag runs.
       html = `<script>
-(function(f,b){if(!b.__SV){var e,g,i,h;window.mixpanel=b;b._i=[];b.init=function(e,f,c){function g(a,d){var b=d.split(".");2==b.length&&(a=a[b[0]],d=b[1]);a[d]=function(){a.push([d].concat(Array.prototype.slice.call(arguments,0)))}}var a=b;"undefined"!==typeof c?a=b[c]=[]:c="mixpanel";a.people=a.people||[];a.toString=function(a){var d="mixpanel";"mixpanel"!==c&&(d+="."+c);a||(d+=" (stub)");return d};a.people.toString=function(){return a.toString(1)+".people (stub)"};i="disable time_event track track_pageview track_links track_forms register register_once unregister identify name_tag set_config reset people.set people.set_once people.increment people.append people.union people.track_charge people.clear_charges people.delete_user".split(" ");for(h=0;h<i.length;h++)g(a,i[h]);b._i.push([e,f,c])};b.__SV=1.1}f&&f.getElementById("_mp_s")||(e=f.createElement("script"),e.id="_mp_s",e.type="text/javascript",e.async=!0,e.src="https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js",g=f.getElementsByTagName("script")[0],g.parentNode.insertBefore(e,g))})(document,window.mixpanel||[]);
-mixpanel.init(${JSON.stringify(pt.tagId)}, {persistence: "localStorage"});
-mixpanel.track(${JSON.stringify(pt.eventName)});
+(function(){
+  try {
+    var token=${JSON.stringify(pt.tagId)};
+    var ev=${JSON.stringify(pt.eventName)};
+    var did;
+    try{var s=JSON.parse(localStorage.getItem('mp_'+token+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
+    if(!did){did='a'+Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem('mp_'+token+'_mixpanel',JSON.stringify({distinct_id:did,$device_id:did}));}catch(e){}}
+    var props={token:token,distinct_id:did,time:Math.floor(Date.now()/1000),$current_url:window.location.href,$pathname:window.location.pathname,$referrer:document.referrer||''};
+    var body='data='+encodeURIComponent(btoa(JSON.stringify([{event:ev,properties:props}])))+'&ip=1&verbose=1';
+    if(navigator.sendBeacon){navigator.sendBeacon('https://api.mixpanel.com/track',new Blob([body],{type:'application/x-www-form-urlencoded'}));}
+    else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(body);}
+  }catch(e){}
+})();
 <\/script>`;
     }
 
@@ -439,8 +500,7 @@ mixpanel.track(${JSON.stringify(pt.eventName)});
     });
   }
 
-  // Publish the workspace
-  await publishWorkspace(accountId, containerId, workspaceId, accessToken, refreshToken);
+  await publishWorkspace(accountId, containerId, freshId, accessToken, refreshToken);
 
   return { triggerId, tags: createdTags };
 }
@@ -450,7 +510,7 @@ mixpanel.track(${JSON.stringify(pt.eventName)});
 export async function createFunnelTagsInGTM(
   accountId: string,
   containerId: string,
-  workspaceId: string,
+  _workspaceId: string,
   funnelName: string,
   steps: FunnelStep[],
   mixpanelToken: string,
@@ -458,7 +518,8 @@ export async function createFunnelTagsInGTM(
   refreshToken?: string | null
 ) {
   const tagmanager = getTagManagerClient(accessToken, refreshToken);
-  const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
+  const freshId = await makeFreshWorkspace(tagmanager, accountId, containerId);
+  const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${freshId}`;
   const createdTags = [];
 
   for (const step of steps) {
@@ -483,12 +544,17 @@ export async function createFunnelTagsInGTM(
 
     const tagBody = `<script>
 (function(){
-  if(typeof mixpanel==='undefined') return;
-  mixpanel.track(${JSON.stringify(step.eventName)},{
-    funnel:${JSON.stringify(funnelName)},
-    step:${JSON.stringify(step.name)},
-    url:window.location.href
-  });
+  try{
+    var token=${JSON.stringify(mixpanelToken)};
+    var ev=${JSON.stringify(step.eventName)};
+    var did;
+    try{var s=JSON.parse(localStorage.getItem('mp_'+token+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
+    if(!did){did='a'+Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem('mp_'+token+'_mixpanel',JSON.stringify({distinct_id:did,$device_id:did}));}catch(e){}}
+    var props={token:token,distinct_id:did,time:Math.floor(Date.now()/1000),funnel:${JSON.stringify(funnelName)},step:${JSON.stringify(step.name)},$current_url:window.location.href,$pathname:window.location.pathname};
+    var body='data='+encodeURIComponent(btoa(JSON.stringify([{event:ev,properties:props}])))+'&ip=1&verbose=1';
+    if(navigator.sendBeacon){navigator.sendBeacon('https://api.mixpanel.com/track',new Blob([body],{type:'application/x-www-form-urlencoded'}));}
+    else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(body);}
+  }catch(e){}
 })();
 </script>`;
 
@@ -509,6 +575,9 @@ export async function createFunnelTagsInGTM(
       step: step.name,
     });
   }
+
+  // Publish the fresh workspace (create_version auto-deletes it after publish)
+  await publishWorkspace(accountId, containerId, freshId, accessToken, refreshToken);
 
   return createdTags;
 }

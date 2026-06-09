@@ -1,16 +1,13 @@
 import Link from "next/link";
 import { verifySession } from "@/lib/dal";
 import { prisma } from "@/lib/db";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 export const metadata = { title: "Dashboard — AI Tracker" };
 
 export default async function DashboardPage() {
   const session = await verifySession();
 
-  const [gtmConn, mpConn, funnels, tags, eventCount, recentEvents] = await Promise.all([
+  const [gtmConn, mpConn, funnels, tags] = await Promise.all([
     prisma.gtmConnection.findUnique({ where: { userId: session.userId } }),
     prisma.mixpanelConnection.findUnique({ where: { userId: session.userId } }),
     prisma.funnel.findMany({ where: { userId: session.userId }, orderBy: { createdAt: "desc" } }),
@@ -19,238 +16,229 @@ export default async function DashboardPage() {
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
-    prisma.event.count({ where: { userId: session.userId } }),
-    prisma.event.findMany({
-      where: { userId: session.userId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-      select: { id: true, type: true, path: true, createdAt: true },
-    }),
   ]);
 
-  const scriptInstalled = eventCount > 0;
+  const publishedCount = tags.filter((t) => t.status === "published").length;
+  const pendingCount = tags.filter((t) => t.status !== "published" && t.status !== "failed").length;
   const autoTagCount = tags.filter((t) => t.tagType === "auto_event").length;
   const funnelTagCount = tags.filter((t) => t.tagType !== "auto_event").length;
-  const publishedCount = tags.filter((t) => t.status === "published").length;
 
   const setupSteps = [
-    { done: !!gtmConn, label: "Connect GTM",           href: "/gtm",      icon: "🏷️" },
-    { done: !!mpConn,  label: "Connect Mixpanel",      href: "/mixpanel", icon: "📈" },
-    { done: scriptInstalled, label: "Install Script",  href: "/install",  icon: "⚡" },
+    { done: !!gtmConn, label: "Connect GTM",      href: "/gtm",      desc: "Link your Google Tag Manager account" },
+    { done: !!mpConn,  label: "Connect Mixpanel", href: "/mixpanel", desc: "Add your Mixpanel project token" },
   ];
-  const allSetup = setupSteps.every((s) => s.done);
+  const setupDone = setupSteps.every((s) => s.done);
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 max-w-5xl space-y-8">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 text-sm mt-1">Tracking engine status</p>
+        <h1 className="text-xl font-semibold text-gray-900 tracking-tight">Dashboard</h1>
+        <p className="text-sm text-gray-400 mt-0.5">Overview of your tracking setup</p>
       </div>
 
       {/* Setup checklist */}
-      {!allSetup && (
-        <Card className="border-blue-100 bg-blue-50/50">
-          <CardHeader>
-            <CardTitle className="text-blue-900">Setup checklist</CardTitle>
-            <CardDescription className="text-blue-700">
-              Complete these steps to activate automatic tracking
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      {!setupDone && (
+        <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-indigo-900">Complete your setup</p>
+              <p className="text-xs text-indigo-600 mt-0.5">{setupSteps.filter(s => s.done).length} of {setupSteps.length} steps done</p>
+            </div>
+          </div>
+          <div className="space-y-3">
             {setupSteps.map((s) => (
-              <div key={s.label} className="flex items-center justify-between">
+              <div key={s.label} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-indigo-100">
                 <div className="flex items-center gap-3">
-                  <span className={`text-lg ${s.done ? "opacity-100" : "opacity-40"}`}>{s.done ? "✅" : "⬜"}</span>
-                  <span className={`text-sm font-medium ${s.done ? "text-gray-500 line-through" : "text-gray-800"}`}>
-                    {s.label}
-                  </span>
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${s.done ? "bg-green-500" : "bg-gray-100 border border-gray-200"}`}>
+                    {s.done ? (
+                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : null}
+                  </div>
+                  <div>
+                    <p className={`text-sm font-medium ${s.done ? "text-gray-400 line-through" : "text-gray-800"}`}>{s.label}</p>
+                    <p className="text-xs text-gray-400">{s.desc}</p>
+                  </div>
                 </div>
                 {!s.done && (
-                  <Link href={s.href}>
-                    <Button size="sm" variant="secondary">Set up →</Button>
+                  <Link
+                    href={s.href}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Set up →
                   </Link>
                 )}
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="GTM"            value={gtmConn ? "Connected" : "Not connected"} ok={!!gtmConn}         href="/gtm" />
-        <StatCard label="Mixpanel"       value={mpConn  ? "Connected" : "Not connected"} ok={!!mpConn}          href="/mixpanel" />
-        <StatCard label="Script"         value={scriptInstalled ? `${eventCount} events` : "Not installed"}     ok={scriptInstalled} href="/install" />
-        <StatCard label="Auto Tags"      value={`${publishedCount} published`}            ok={publishedCount > 0} href="/gtm" />
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard
+          href="/gtm"
+          label="GTM"
+          value={gtmConn ? "Connected" : "Not connected"}
+          ok={!!gtmConn}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+          }
+        />
+        <StatCard
+          href="/mixpanel"
+          label="Mixpanel"
+          value={mpConn ? "Connected" : "Not connected"}
+          ok={!!mpConn}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            </svg>
+          }
+        />
+        <StatCard
+          href="/gtm"
+          label="Published Tags"
+          value={publishedCount === 0 ? "None yet" : `${publishedCount} live`}
+          ok={publishedCount > 0}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M5 13l4 4L19 7" />
+            </svg>
+          }
+        />
       </div>
 
-      {/* Tracking flow */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tracking flow</CardTitle>
-          <CardDescription>How events flow from your website to Mixpanel</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 flex-wrap text-sm">
-            {[
-              { label: "Your Website",   ok: scriptInstalled },
-              { label: "tracker.js",     ok: scriptInstalled },
-              { label: "dataLayer",      ok: scriptInstalled },
-              { label: "Backend API",    ok: scriptInstalled },
-              { label: "GTM",            ok: !!gtmConn && publishedCount > 0 },
-              { label: "Mixpanel",       ok: !!mpConn },
-            ].map((node, i, arr) => (
-              <div key={node.label} className="flex items-center gap-2">
-                <span className={`px-3 py-1.5 rounded-lg font-medium text-xs border ${
-                  node.ok
-                    ? "bg-green-50 border-green-200 text-green-700"
-                    : "bg-gray-50 border-gray-200 text-gray-400"
-                }`}>
-                  {node.label}
-                </span>
-                {i < arr.length - 1 && (
-                  <span className={`text-lg ${node.ok ? "text-green-400" : "text-gray-200"}`}>→</span>
-                )}
+      {/* Tags table */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Generated Tags</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{autoTagCount} event · {funnelTagCount} funnel</p>
+          </div>
+          <Link
+            href="/gtm"
+            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            + New campaign
+          </Link>
+        </div>
+
+        {tags.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+            <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mb-3">
+              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-gray-700">No tags yet</p>
+            <p className="text-xs text-gray-400 mt-1 mb-4">Go to GTM Setup to define a funnel and deploy your first tags.</p>
+            <Link
+              href="/gtm"
+              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-2 rounded-lg transition-colors"
+            >
+              Go to GTM Setup →
+            </Link>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {tags.slice(0, 10).map((t) => (
+              <div key={t.id} className="flex items-center justify-between px-6 py-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${t.tagType === "auto_event" ? "bg-amber-100" : "bg-indigo-100"}`}>
+                    <span className="text-xs">{t.tagType === "auto_event" ? "⚡" : "🔀"}</span>
+                  </div>
+                  <span className="text-sm text-gray-800 font-medium truncate">{t.name}</span>
+                </div>
+                <StatusBadge status={t.status} />
               </div>
             ))}
+            {tags.length > 10 && (
+              <div className="px-6 py-3 text-xs text-gray-400 text-center">
+                +{tags.length - 10} more tags
+              </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent events */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Live Events</CardTitle>
-                <CardDescription>Latest activity from your website</CardDescription>
-              </div>
-              <Link href="/events">
-                <Button size="sm" variant="secondary">View all</Button>
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {recentEvents.length === 0 ? (
-              <div className="text-center py-6">
-                <div className="text-3xl mb-2">📡</div>
-                <p className="text-sm text-gray-400">No events yet</p>
-                <Link href="/install" className="text-xs text-blue-600 hover:underline mt-1 inline-block">
-                  Install tracking script →
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {recentEvents.map((e) => (
-                  <div key={e.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-sm">{typeIcon(e.type)}</span>
-                      <span className="text-xs font-mono text-gray-600 truncate">{e.path}</span>
-                    </div>
-                    <span className="text-xs text-gray-400 shrink-0 ml-2">
-                      {new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Auto-generated tags */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Auto Tags</CardTitle>
-                <CardDescription>GTM tags created automatically</CardDescription>
-              </div>
-              <div className="flex gap-2 text-xs text-gray-500">
-                <span>{autoTagCount} event</span>
-                <span>·</span>
-                <span>{funnelTagCount} funnel</span>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {tags.length === 0 ? (
-              <div className="text-center py-6">
-                <div className="text-3xl mb-2">🏷️</div>
-                <p className="text-sm text-gray-400">No tags yet</p>
-                <p className="text-xs text-gray-400 mt-1">Tags are created automatically when events are detected</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {tags.slice(0, 8).map((t) => (
-                  <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xs text-gray-400">{t.tagType === "auto_event" ? "⚡" : "🔀"}</span>
-                      <span className="text-sm text-gray-800 truncate">{t.name}</span>
-                    </div>
-                    <Badge variant={t.status === "published" ? "success" : t.status === "failed" ? "danger" : "warning"}>
-                      {t.status}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        )}
       </div>
 
       {/* Funnels */}
       {funnels.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Funnels</CardTitle>
-                <CardDescription>Your tracked conversion funnels</CardDescription>
-              </div>
-              <Link href="/gtm">
-                <Button size="sm">+ New funnel</Button>
-              </Link>
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Funnels</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Your tracked conversion funnels</p>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {funnels.map((f) => (
-                <div key={f.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+            <Link
+              href="/gtm"
+              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              + New funnel
+            </Link>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {funnels.map((f) => {
+              let stepCount = 0;
+              try { stepCount = (JSON.parse(f.steps) as unknown[]).length; } catch { /* noop */ }
+              return (
+                <div key={f.id} className="flex items-center justify-between px-6 py-3">
                   <div>
-                    <div className="text-sm font-medium text-gray-900">{f.name}</div>
-                    <div className="text-xs text-gray-400">{f.websiteUrl}</div>
+                    <p className="text-sm font-medium text-gray-900">{f.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{f.websiteUrl}</p>
                   </div>
-                  <Badge variant="info">
-                    {(JSON.parse(f.steps) as unknown[]).length} steps
-                  </Badge>
+                  <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
+                    {stepCount} steps
+                  </span>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-function StatCard({ label, value, ok, href }: { label: string; value: string; ok: boolean; href: string }) {
+function StatCard({ href, label, value, ok, icon }: {
+  href: string; label: string; value: string; ok: boolean;
+  icon: React.ReactNode;
+}) {
   return (
-    <Link href={href}>
-      <Card className="hover:border-blue-200 transition-colors cursor-pointer">
-        <CardContent className="pt-4">
-          <div className="text-xs text-gray-500 mb-1">{label}</div>
-          <Badge variant={ok ? "success" : "warning"}>{value}</Badge>
-        </CardContent>
-      </Card>
+    <Link href={href} className="block">
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 hover:border-indigo-200 hover:shadow-sm transition-all group">
+        <div className="flex items-start justify-between mb-3">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${ok ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"}`}>
+            {icon}
+          </div>
+          <div className={`w-2 h-2 rounded-full mt-1 ${ok ? "bg-green-400" : "bg-gray-300"}`} />
+        </div>
+        <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">{label}</p>
+        <p className={`text-sm font-semibold ${ok ? "text-gray-900" : "text-gray-500"}`}>{value}</p>
+      </div>
     </Link>
   );
 }
 
-function typeIcon(type: string) {
-  const icons: Record<string, string> = {
-    page_view: "👁️", button_click: "🖱️", form_submit: "📋",
-    signup: "✍️", login: "🔑", checkout_started: "🛒", purchase: "💳", scroll_depth: "📜",
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    published: "bg-green-100 text-green-700",
+    failed:    "bg-red-100 text-red-700",
+    pending:   "bg-amber-100 text-amber-700",
+    draft:     "bg-gray-100 text-gray-600",
   };
-  return icons[type] || "•";
+  return (
+    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium shrink-0 ${map[status] ?? "bg-gray-100 text-gray-600"}`}>
+      {status}
+    </span>
+  );
 }

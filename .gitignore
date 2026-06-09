@@ -51,3 +51,5 @@ next-env.d.ts
 # Local dev scripts and config
 /scripts/
 /.claude/
+
+.vercel

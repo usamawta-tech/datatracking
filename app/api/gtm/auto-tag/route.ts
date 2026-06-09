@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { createFunnelTagsInGTM, publishWorkspace, getValidAccessToken, type FunnelStep } from "@/lib/gtm";
+import { createFunnelTagsInGTM, getValidAccessToken, type FunnelStep } from "@/lib/gtm";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -46,15 +46,6 @@ export async function POST(req: NextRequest) {
       gtmConn.refreshToken
     );
 
-    // Publish the workspace so tags go live immediately
-    await publishWorkspace(
-      gtmConn.selectedAccountId,
-      gtmConn.selectedContainerId,
-      gtmConn.selectedWorkspaceId,
-      accessToken,
-      gtmConn.refreshToken
-    );
-
     const savedTags = await Promise.all(
       createdTags.map((t) =>
         prisma.generatedTag.create({
@@ -75,7 +66,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ tags: savedTags });
   } catch (e: unknown) {
     console.error("Auto-tag error:", e);
-    const msg = e instanceof Error ? e.message : "Auto-tagging failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const apiMsg = (() => {
+      if (e && typeof e === "object") {
+        const data = ((e as Record<string,unknown>).response as Record<string,unknown> | undefined)?.data as Record<string,unknown> | undefined;
+        const nested = data?.error as Record<string,unknown> | undefined;
+        if (typeof nested?.message === "string") return nested.message;
+      }
+      return e instanceof Error ? e.message : "Auto-tagging failed";
+    })();
+    const status = /workspace|submitted|GTM/i.test(apiMsg) ? 422 : 500;
+    return NextResponse.json({ error: apiMsg }, { status });
   }
 }

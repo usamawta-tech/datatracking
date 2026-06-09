@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decrypt } from "@/lib/session";
 
-const protectedRoutes = ["/dashboard", "/gtm", "/mixpanel", "/install", "/events"];
+const protectedRoutes = ["/dashboard", "/gtm", "/mixpanel"];
 const publicRoutes = ["/login", "/signup", "/verify-email", "/"];
 
 export default async function proxy(req: NextRequest) {

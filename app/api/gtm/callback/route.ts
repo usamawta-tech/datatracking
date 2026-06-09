@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (e) {
     console.error("GTM OAuth callback error:", e);
-    return NextResponse.redirect(new URL("/login?error=auth_failed", appUrl));
+    const msg = encodeURIComponent(e instanceof Error ? e.message : String(e));
+    return NextResponse.redirect(new URL(`/login?error=${msg}`, appUrl));
   }
 }

@@ -428,6 +428,41 @@ export interface PlatformTagConfig {
   eventName: string;
 }
 
+// Finds the Mixpanel GTM gallery template in the workspace, importing it if missing.
+// Returns the templateId (used as cvt_{templateId} tag type) or null on failure.
+async function getOrImportMixpanelTemplate(
+  tm: ReturnType<typeof getTagManagerClient>,
+  parent: string
+): Promise<string | null> {
+  try {
+    // Check if the template is already in this workspace
+    const listRes = await tm.accounts.containers.workspaces.templates.list({ parent });
+    const existing = (listRes.data.template ?? []).find(
+      (t) =>
+        t.galleryReference?.owner?.toLowerCase() === "mixpanel" ||
+        t.galleryReference?.repository?.toLowerCase().includes("mixpanel") ||
+        t.name?.toLowerCase().includes("mixpanel")
+    );
+    if (existing?.templateId) return existing.templateId;
+
+    // Not found — import from the GTM Community Gallery
+    const importRes = await tm.accounts.containers.workspaces.templates.create({
+      parent,
+      requestBody: {
+        galleryReference: {
+          host:       "tagmanager.google.com",
+          owner:      "mixpanel",
+          repository: "mixpanel-for-gtm",
+          isModified: false,
+        },
+      },
+    });
+    return importRes.data.templateId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function deployCampaignTags(
   accountId: string,
   containerId: string,
@@ -512,9 +547,20 @@ fbq('track',${JSON.stringify(pt.eventName)});
       parameters = [{ type: "TEMPLATE", key: "html", value: html }];
 
     } else if (pt.platform === "mixpanel") {
-      // Custom HTML — Mixpanel has no native GTM template.
-      // Uses HTTP Ingestion API via sendBeacon for reliable delivery.
-      const html = `<script>
+      // Use the official Mixpanel GTM gallery template (owner: mixpanel, repo: mixpanel-for-gtm).
+      // Import it into the workspace if not already present, then use cvt_{templateId} as the tag type.
+      const mpTemplateId = await getOrImportMixpanelTemplate(tm, parent);
+
+      if (mpTemplateId) {
+        tagType = `cvt_${mpTemplateId}`;
+        parameters = [
+          { type: "TEMPLATE", key: "projectToken",    value: pt.tagId },
+          { type: "TEMPLATE", key: "trackEventName",  value: pt.eventName },
+          { type: "BOOLEAN",  key: "trackPageView",   value: "false" },
+        ];
+      } else {
+        // Gallery import failed — fall back to Custom HTML with direct HTTP API
+        const html = `<script>
 (function(){try{
   var t=${JSON.stringify(pt.tagId)},ev=${JSON.stringify(pt.eventName)},did;
   try{var s=JSON.parse(localStorage.getItem('mp_'+t+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
@@ -525,7 +571,8 @@ fbq('track',${JSON.stringify(pt.eventName)});
   else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(b);}
 }catch(e){}})();
 <\/script>`;
-      parameters = [{ type: "TEMPLATE", key: "html", value: html }];
+        parameters = [{ type: "TEMPLATE", key: "html", value: html }];
+      }
     }
 
     const tagRes = await tm.accounts.containers.workspaces.tags.create({

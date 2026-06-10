@@ -466,45 +466,74 @@ export async function deployCampaignTags(
   const createdTags: Array<{ platform: TagPlatform; gtmTagId: string; name: string }> = [];
 
   for (const pt of platformTags) {
-    let html = "";
     const tagName = `Campaign - ${campaignName} - ${pt.platform}`;
 
-    if (pt.platform === "google_ads") {
-      html = `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('event', ${JSON.stringify(pt.eventName)}, {'send_to': ${JSON.stringify(pt.tagId)}});<\/script>`;
-    } else if (pt.platform === "ga4") {
-      html = `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('event', ${JSON.stringify(pt.eventName)}, {'send_to': ${JSON.stringify(pt.tagId)}});<\/script>`;
+    // Build the native GTM tag template for each platform.
+    // GA4 and Google Ads use GTM's built-in tag types.
+    // Meta (Facebook) and Mixpanel use Custom HTML — no native GTM template exists for them.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type TagParam = any;
+    let tagType = "html";
+    let parameters: TagParam[] = [];
+
+    if (pt.platform === "ga4") {
+      // Native GTM template: Google Analytics GA4 Event (type: gaawe)
+      tagType = "gaawe";
+      parameters = [
+        { type: "TEMPLATE", key: "measurementId", value: pt.tagId },   // G-XXXXXXXXXX
+        { type: "TEMPLATE", key: "eventName",     value: pt.eventName },
+        { type: "BOOLEAN",  key: "sendEcommerceData",     value: "false" },
+        { type: "TEMPLATE", key: "getEcommerceDataFrom",  value: "dataLayer" },
+        { type: "LIST",     key: "eventParameters",       list: [] },
+        { type: "LIST",     key: "userProperties",        list: [] },
+      ];
+
+    } else if (pt.platform === "google_ads") {
+      // Native GTM template: Google Ads Conversion Tracking (type: adwords_conversion)
+      // tagId format expected: "AW-123456789" or "AW-123456789/ConvLabel"
+      const stripped = pt.tagId.replace(/^AW-/i, "");
+      const [convId, convLabel] = stripped.split("/");
+      tagType = "adwords_conversion";
+      parameters = [
+        { type: "TEMPLATE", key: "conversionId",    value: convId },
+        { type: "TEMPLATE", key: "conversionLabel", value: convLabel || pt.eventName },
+        { type: "TEMPLATE", key: "conversionValue", value: "0" },
+        { type: "TEMPLATE", key: "currencyCode",    value: "USD" },
+        { type: "BOOLEAN",  key: "remarketing_only", value: "false" },
+      ];
+
     } else if (pt.platform === "meta") {
-      html = `<script>
+      // Custom HTML — Meta Pixel has no native GTM template available via the API
+      const html = `<script>
 !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-fbq('init', ${JSON.stringify(pt.tagId)});
-fbq('track', ${JSON.stringify(pt.eventName)});
+fbq('init',${JSON.stringify(pt.tagId)});
+fbq('track',${JSON.stringify(pt.eventName)});
 <\/script>`;
+      parameters = [{ type: "TEMPLATE", key: "html", value: html }];
+
     } else if (pt.platform === "mixpanel") {
-      // Use Mixpanel HTTP Ingestion API directly via sendBeacon — no SDK loading,
-      // no CDN dependency, no async timing issues. Fires synchronously when GTM tag runs.
-      html = `<script>
-(function(){
-  try {
-    var token=${JSON.stringify(pt.tagId)};
-    var ev=${JSON.stringify(pt.eventName)};
-    var did;
-    try{var s=JSON.parse(localStorage.getItem('mp_'+token+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
-    if(!did){did='a'+Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem('mp_'+token+'_mixpanel',JSON.stringify({distinct_id:did,$device_id:did}));}catch(e){}}
-    var props={token:token,distinct_id:did,time:Math.floor(Date.now()/1000),$current_url:window.location.href,$pathname:window.location.pathname,$referrer:document.referrer||''};
-    var body='data='+encodeURIComponent(btoa(JSON.stringify([{event:ev,properties:props}])))+'&ip=1&verbose=1';
-    if(navigator.sendBeacon){navigator.sendBeacon('https://api.mixpanel.com/track',new Blob([body],{type:'application/x-www-form-urlencoded'}));}
-    else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(body);}
-  }catch(e){}
-})();
+      // Custom HTML — Mixpanel has no native GTM template.
+      // Uses HTTP Ingestion API via sendBeacon for reliable delivery.
+      const html = `<script>
+(function(){try{
+  var t=${JSON.stringify(pt.tagId)},ev=${JSON.stringify(pt.eventName)},did;
+  try{var s=JSON.parse(localStorage.getItem('mp_'+t+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
+  if(!did){did='a'+Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem('mp_'+t+'_mixpanel',JSON.stringify({distinct_id:did,$device_id:did}));}catch(e){}}
+  var p={token:t,distinct_id:did,time:Math.floor(Date.now()/1000),$current_url:location.href,$pathname:location.pathname,$referrer:document.referrer||''};
+  var b='data='+encodeURIComponent(btoa(JSON.stringify([{event:ev,properties:p}])))+'&ip=1&verbose=1';
+  if(navigator.sendBeacon){navigator.sendBeacon('https://api.mixpanel.com/track',new Blob([b],{type:'application/x-www-form-urlencoded'}));}
+  else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(b);}
+}catch(e){}})();
 <\/script>`;
+      parameters = [{ type: "TEMPLATE", key: "html", value: html }];
     }
 
     const tagRes = await tm.accounts.containers.workspaces.tags.create({
       parent,
       requestBody: {
         name: tagName,
-        type: "html",
-        parameter: [{ type: "TEMPLATE", key: "html", value: html }],
+        type: tagType,
+        parameter: parameters,
         firingTriggerId: [triggerId],
       },
     });

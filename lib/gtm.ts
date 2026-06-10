@@ -312,8 +312,10 @@ export async function createEventTagInGTM(
   };
 }
 
-// Creates a clean temporary workspace for each deploy.
-// GTM auto-deletes the workspace when create_version is called, so there is no leak.
+// Returns the Default workspace ID. The Default workspace is permanent — GTM never
+// deletes it — so tags deployed here are always visible in the GTM Tags section.
+// After create_version + publish, the Default workspace resets to reflect the
+// published state, making all deployed tags visible.
 async function makeFreshWorkspace(
   tm: ReturnType<typeof getTagManagerClient>,
   accountId: string,
@@ -321,34 +323,20 @@ async function makeFreshWorkspace(
 ): Promise<string> {
   const containerParent = `accounts/${accountId}/containers/${containerId}`;
 
-  // Delete any leftover ait-deploy-* workspaces from previously failed deploys.
-  try {
-    const list = await tm.accounts.containers.workspaces.list({ parent: containerParent });
-    const stale = (list.data.workspace ?? []).filter(
-      (w) => w.name?.startsWith("ait-deploy-") && w.workspaceId
-    );
-    await Promise.allSettled(
-      stale.map((w) =>
-        tm.accounts.containers.workspaces.delete({
-          path: `${containerParent}/workspaces/${w.workspaceId}`,
-        })
-      )
-    );
-  } catch {
-    // non-fatal — proceed even if cleanup fails
+  const list = await tm.accounts.containers.workspaces.list({ parent: containerParent });
+  const workspaces = list.data.workspace ?? [];
+
+  // Default workspace is always named "Default" and is the permanent workspace.
+  const defaultWs =
+    workspaces.find((w) => w.name === "Default") ??
+    workspaces.find((w) => w.workspaceId === "1") ??
+    workspaces[0];
+
+  if (!defaultWs?.workspaceId) {
+    throw new Error("GTM: could not find Default workspace in this container");
   }
 
-  const res = await tm.accounts.containers.workspaces.create({
-    parent: containerParent,
-    requestBody: {
-      name: `ait-deploy-${Date.now()}`,
-      description: "Temporary workspace created by AI Tracker. Safe to delete.",
-    },
-  });
-
-  const id = res.data.workspaceId;
-  if (!id) throw new Error("GTM: could not create a fresh deployment workspace");
-  return id;
+  return defaultWs.workspaceId;
 }
 
 export async function publishWorkspace(
@@ -359,23 +347,51 @@ export async function publishWorkspace(
   refreshToken?: string | null
 ) {
   const tm = getTagManagerClient(accessToken, refreshToken);
-  const path = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
+  const wsPath = `accounts/${accountId}/containers/${containerId}/workspaces/${workspaceId}`;
+  const label = `AI Tracker ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
 
-  const versionRes = await tm.accounts.containers.workspaces.create_version({
-    path,
-    requestBody: {
-      name: `AI Tracker ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
-    },
-  });
+  async function doPublish() {
+    const versionRes = await tm.accounts.containers.workspaces.create_version({
+      path: wsPath,
+      requestBody: { name: label },
+    });
+    const versionId = versionRes.data.containerVersion?.containerVersionId;
+    if (!versionId) throw new Error("GTM: failed to create container version");
+    await tm.accounts.containers.versions.publish({
+      path: `accounts/${accountId}/containers/${containerId}/versions/${versionId}`,
+    });
+    return { versionId };
+  }
 
-  const versionId = versionRes.data.containerVersion?.containerVersionId;
-  if (!versionId) throw new Error("GTM: failed to create container version");
+  try {
+    return await doPublish();
+  } catch (err: unknown) {
+    const msg = gtmErrMsg(err);
 
-  await tm.accounts.containers.versions.publish({
-    path: `accounts/${accountId}/containers/${containerId}/versions/${versionId}`,
-  });
+    if (msg.includes("already") || msg.includes("submitted") || msg.includes("conflict") || msg.includes("fingerprint")) {
+      // Workspace has a pending submitted version. Find it and publish it first
+      // to clear the submitted state, then retry with our new tags.
+      try {
+        // Get the latest version header and publish it to clear the submitted state
+        const latestRes = await tm.accounts.containers.version_headers.latest({
+          parent: `accounts/${accountId}/containers/${containerId}`,
+        });
+        const versionId = latestRes.data.containerVersionId;
+        if (versionId) {
+          await tm.accounts.containers.versions.publish({
+            path: `accounts/${accountId}/containers/${containerId}/versions/${versionId}`,
+          }).catch(() => {/* may already be live */});
+        }
+      } catch {
+        // non-fatal
+      }
 
-  return { versionId };
+      // Retry now that submitted state is cleared
+      return await doPublish();
+    }
+
+    throw err;
+  }
 }
 
 // ─── Funnel-based tagging (existing) ──────────────────────────────────────────

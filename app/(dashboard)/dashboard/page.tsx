@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { verifySession } from "@/lib/dal";
 import { prisma } from "@/lib/db";
+import { TagsCard } from "@/components/dashboard/tags-card";
 
 export const metadata = { title: "Dashboard — AI Tracker" };
 
@@ -14,14 +15,10 @@ export default async function DashboardPage() {
     prisma.generatedTag.findMany({
       where: { userId: session.userId },
       orderBy: { createdAt: "desc" },
-      take: 20,
     }),
   ]);
 
   const publishedCount = tags.filter((t) => t.status === "published").length;
-  const pendingCount = tags.filter((t) => t.status !== "published" && t.status !== "failed").length;
-  const autoTagCount = tags.filter((t) => t.tagType === "auto_event").length;
-  const funnelTagCount = tags.filter((t) => t.tagType !== "auto_event").length;
 
   const setupSteps = [
     { done: !!gtmConn, label: "Connect GTM",      href: "/gtm",      desc: "Link your Google Tag Manager account" },
@@ -119,57 +116,15 @@ export default async function DashboardPage() {
       </div>
 
       {/* Tags table */}
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900">Generated Tags</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{autoTagCount} event · {funnelTagCount} funnel</p>
-          </div>
-          <Link
-            href="/gtm"
-            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            + New campaign
-          </Link>
-        </div>
-
-        {tags.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-            <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mb-3">
-              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-gray-700">No tags yet</p>
-            <p className="text-xs text-gray-400 mt-1 mb-4">Go to GTM Setup to define a funnel and deploy your first tags.</p>
-            <Link
-              href="/gtm"
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-2 rounded-lg transition-colors"
-            >
-              Go to GTM Setup →
-            </Link>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {tags.slice(0, 10).map((t) => (
-              <div key={t.id} className="flex items-center justify-between px-6 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${t.tagType === "auto_event" ? "bg-amber-100" : "bg-indigo-100"}`}>
-                    <span className="text-xs">{t.tagType === "auto_event" ? "⚡" : "🔀"}</span>
-                  </div>
-                  <span className="text-sm text-gray-800 font-medium truncate">{t.name}</span>
-                </div>
-                <StatusBadge status={t.status} />
-              </div>
-            ))}
-            {tags.length > 10 && (
-              <div className="px-6 py-3 text-xs text-gray-400 text-center">
-                +{tags.length - 10} more tags
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <TagsCard
+        initialTags={tags.map((t) => ({
+          id: t.id,
+          name: t.name,
+          tagType: t.tagType,
+          status: t.status,
+          createdAt: t.createdAt.toISOString(),
+        }))}
+      />
 
       {/* Funnels */}
       {funnels.length > 0 && (
@@ -209,6 +164,7 @@ export default async function DashboardPage() {
   );
 }
 
+
 function StatCard({ href, label, value, ok, icon }: {
   href: string; label: string; value: string; ok: boolean;
   icon: React.ReactNode;
@@ -229,16 +185,3 @@ function StatCard({ href, label, value, ok, icon }: {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    published: "bg-green-100 text-green-700",
-    failed:    "bg-red-100 text-red-700",
-    pending:   "bg-amber-100 text-amber-700",
-    draft:     "bg-gray-100 text-gray-600",
-  };
-  return (
-    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium shrink-0 ${map[status] ?? "bg-gray-100 text-gray-600"}`}>
-      {status}
-    </span>
-  );
-}

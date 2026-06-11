@@ -154,7 +154,12 @@ export async function activateMixpanelTracking(
   const clickTrigId    = clickRes.data.triggerId!;
   const formTrigId     = formRes.data.triggerId!;
 
+
   // ── 2. Mixpanel Init tag (All Pages, once per page) ─────────────────────────
+  // Kept as Custom HTML: loads the Mixpanel SDK async stub, initialises the project,
+  // and registers document-level click/form listeners that MP - Button Click and
+  // MP - Form Submit depend on. This bootstrap behaviour cannot be expressed as a
+  // simple Mixpanel template event call.
   const initHtml = `<script>
 /* Mixpanel SDK stub — queues calls until SDK loads */
 (function(f,b){if(!b.__SV){var e,g,i,h;window.mixpanel=b;b._i=[];b.init=function(e,f,c){function g(a,d){var b=d.split(".");2==b.length&&(a=a[b[0]],d=b[1]);a[d]=function(){a.push([d].concat(Array.prototype.slice.call(arguments,0)))}}var a=b;"undefined"!==typeof c?a=b[c]=[]:c="mixpanel";a.people=a.people||[];a.toString=function(a){var d="mixpanel";"mixpanel"!==c&&(d+="."+c);a||(d+=" (stub)");return d};a.people.toString=function(){return a.toString(1)+".people (stub)"};i="disable time_event track track_pageview track_links track_forms register register_once unregister identify name_tag set_config reset people.set people.set_once people.increment people.append people.union people.track_charge people.clear_charges people.delete_user".split(" ");for(h=0;h<i.length;h++)g(a,i[h]);b._i.push([e,f,c])};b.__SV=1.1}f&&f.getElementById("_mp_s")||(e=f.createElement("script"),e.id="_mp_s",e.type="text/javascript",e.async=!0,e.src="https://cdn.mixpanel.com/libs/mixpanel-2-latest.min.js",g=f.getElementsByTagName("script")[0],g.parentNode.insertBefore(e,g))})(document,window.mixpanel||[]);
@@ -172,7 +177,7 @@ document.addEventListener("submit",function(e){
 },true);
 <\/script>`;
 
-  const initRes = await tm.accounts.containers.workspaces.tags.create({
+  await tm.accounts.containers.workspaces.tags.create({
     parent,
     requestBody: {
       name: "MP - Init",
@@ -184,8 +189,6 @@ document.addEventListener("submit",function(e){
   });
   created.push("MP - Init");
 
-  const setupTag = [{ tagName: "MP - Init", stopOnSetupFailure: false }];
-
   // ── 3. Page View tag ─────────────────────────────────────────────────────────
   await tm.accounts.containers.workspaces.tags.create({
     parent,
@@ -196,7 +199,6 @@ document.addEventListener("submit",function(e){
 (function(){var t=0;(function w(){if(window._mpReady&&window.mixpanel){mixpanel.track("page_view",{page:window.location.pathname,title:document.title,url:window.location.href,referrer:document.referrer});}else if(++t<30){setTimeout(w,100);}})();})();
 <\/script>` }],
       firingTriggerId: [allPagesTrigId],
-      setupTag,
     },
   });
   created.push("MP - Page View");
@@ -211,7 +213,6 @@ document.addEventListener("submit",function(e){
 (function(){var t=0;(function w(){if(window._mpReady&&window.mixpanel&&window._mpClick){var c=window._mpClick;var ev=c.text&&/(buy|purchase|checkout|order)/i.test(c.text)?"checkout_started":c.text&&/(sign up|signup|register|join)/i.test(c.text)?"signup":c.text&&/(sign in|login|log in)/i.test(c.text)?"login":"button_click";mixpanel.track(ev,{page:window.location.pathname,button_text:c.text,element_id:c.id,element_tag:c.tag,href:c.href});}else if(++t<30){setTimeout(w,100);}})();})();
 <\/script>` }],
       firingTriggerId: [clickTrigId],
-      setupTag,
     },
   });
   created.push("MP - Button Click");
@@ -226,7 +227,6 @@ document.addEventListener("submit",function(e){
 (function(){var t=0;(function w(){if(window._mpReady&&window.mixpanel&&window._mpForm){var f=window._mpForm;var ev=/(login|signin)/i.test(f.id+f.action)?"login":/(signup|register|join)/i.test(f.id+f.action)?"signup":"form_submit";mixpanel.track(ev,{page:window.location.pathname,form_id:f.id,form_action:f.action});}else if(++t<30){setTimeout(w,100);}})();})();
 <\/script>` }],
       firingTriggerId: [formTrigId],
-      setupTag,
     },
   });
   created.push("MP - Form Submit");
@@ -234,7 +234,6 @@ document.addEventListener("submit",function(e){
   // ── 6. Publish workspace ──────────────────────────────────────────────────────
   await publishWorkspace(accountId, containerId, freshId, accessToken, refreshToken);
 
-  void initRes; // suppress unused warning
   return { tagsCreated: created };
 }
 
@@ -272,35 +271,18 @@ export async function createEventTagInGTM(
 
   const triggerId = triggerRes.data.triggerId!;
 
-  // Custom HTML tag — reads event props from dataLayer and sends to Mixpanel
-  const tagHtml = `<script>
-(function(){
-  if(typeof mixpanel==='undefined'){return;}
-  var dl=window.dataLayer||[];
-  var ev={};
-  for(var i=dl.length-1;i>=0;i--){
-    if(dl[i]&&dl[i].event===${JSON.stringify(eventName)}){ev=dl[i];break;}
-  }
-  mixpanel.track(${JSON.stringify(eventName)},{
-    distinct_id:ev.distinct_id||'anonymous',
-    page:ev.page||window.location.pathname,
-    page_title:ev.page_title||document.title,
-    session_id:ev.session_id,
-    button_text:ev.button_text,
-    form_id:ev.form_id,
-    scroll_percent:ev.scroll_percent,
-    href:ev.href,
-    timestamp:ev.timestamp||Date.now()
-  });
-})();
-</script>`;
+  const mixpanelTagType = await resolveMixpanelTemplateType(tagmanager, parent, accessToken);
 
   const tagRes = await tagmanager.accounts.containers.workspaces.tags.create({
     parent,
     requestBody: {
       name: `Auto - ${eventName}`,
-      type: "html",
-      parameter: [{ type: "TEMPLATE", key: "html", value: tagHtml }],
+      type: mixpanelTagType,
+      parameter: [
+        { type: "TEMPLATE", key: "token",          value: mixpanelToken },
+        { type: "TEMPLATE", key: "type",           value: "track" },
+        { type: "TEMPLATE", key: "trackEventName", value: eventName },
+      ],
       firingTriggerId: [triggerId],
     },
   });
@@ -428,39 +410,105 @@ export interface PlatformTagConfig {
   eventName: string;
 }
 
-// Finds the Mixpanel GTM gallery template in the workspace, importing it if missing.
-// Returns the templateId (used as cvt_{templateId} tag type) or null on failure.
-async function getOrImportMixpanelTemplate(
-  tm: ReturnType<typeof getTagManagerClient>,
-  parent: string
-): Promise<string | null> {
-  try {
-    // Check if the template is already in this workspace
-    const listRes = await tm.accounts.containers.workspaces.templates.list({ parent });
-    const existing = (listRes.data.template ?? []).find(
-      (t) =>
-        t.galleryReference?.owner?.toLowerCase() === "mixpanel" ||
-        t.galleryReference?.repository?.toLowerCase().includes("mixpanel") ||
-        t.name?.toLowerCase().includes("mixpanel")
-    );
-    if (existing?.templateId) return existing.templateId;
+// ─── Mixpanel template resolution ─────────────────────────────────────────────
 
-    // Not found — import from the GTM Community Gallery
-    const importRes = await tm.accounts.containers.workspaces.templates.create({
-      parent,
-      requestBody: {
-        galleryReference: {
-          host:       "tagmanager.google.com",
-          owner:      "mixpanel",
-          repository: "mixpanel-for-gtm",
-          isModified: false,
-        },
-      },
-    });
-    return importRes.data.templateId ?? null;
-  } catch {
-    return null;
+// ─── Gallery template resolver ────────────────────────────────────────────────
+// cvt_ tag types use galleryReference.galleryTemplateId (e.g. "TNPH4", "5RM3Q") —
+// NOT templateId (sequential int) or fingerprint (version hash).
+// galleryTemplateId is assigned once on first sync and is stable across workspaces.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GtmTemplate = any;
+
+async function resolveGalleryTemplateType(
+  tm: ReturnType<typeof getTagManagerClient>,
+  parent: string,
+  galleryOwner: string,
+  galleryRepository: string,
+  matchFn: (t: GtmTemplate) => boolean,
+  accessToken: string
+): Promise<string> {
+  const extractId = (t: GtmTemplate): string | null =>
+    t?.galleryReference?.galleryTemplateId ?? null;
+
+  // 1. Check if template already in workspace
+  let templates: GtmTemplate[] = [];
+  try {
+    const res = await tm.accounts.containers.workspaces.templates.list({ parent });
+    templates = res.data.template ?? [];
+  } catch (err) {
+    throw new Error(`GTM: templates.list failed — ${gtmErrMsg(err)}`);
   }
+
+  const existingId = extractId(templates.find(matchFn));
+  if (existingId) return `cvt_${existingId}`;
+
+  // 2. Import via direct HTTP — bypasses googleapis client param-encoding quirks.
+  //    Exact URL format confirmed working via Postman.
+  const importUrl =
+    `https://tagmanager.googleapis.com/tagmanager/v2/${parent}/templates:import_from_gallery` +
+    `?galleryOwner=${encodeURIComponent(galleryOwner)}` +
+    `&galleryRepository=${encodeURIComponent(galleryRepository)}` +
+    `&acknowledgePermissions=true`;
+
+  const importRes = await fetch(importUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+
+  if (!importRes.ok) {
+    const errText = await importRes.text().catch(() => "");
+    throw new Error(
+      `GTM: import_from_gallery ${galleryOwner}/${galleryRepository} failed — ${importRes.status}: ${errText}`
+    );
+  }
+
+  // 3. Re-list up to 5× with 1 s delay to get the persisted galleryTemplateId
+  for (let i = 0; i < 5; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const res2 = await tm.accounts.containers.workspaces.templates.list({ parent });
+      const id = extractId((res2.data.template ?? []).find(matchFn));
+      if (id) return `cvt_${id}`;
+    } catch { /* retry */ }
+  }
+
+  throw new Error(
+    `GTM: ${galleryOwner}/${galleryRepository} imported but galleryTemplateId could not be resolved`
+  );
+}
+
+async function resolveMixpanelTemplateType(
+  tm: ReturnType<typeof getTagManagerClient>,
+  parent: string,
+  accessToken: string
+): Promise<string> {
+  return resolveGalleryTemplateType(
+    tm, parent,
+    "mixpanel", "mixpanel-gtm-template",
+    (t) => t.galleryReference?.owner?.toLowerCase() === "mixpanel" ||
+            t.name?.toLowerCase().includes("mixpanel"),
+    accessToken
+  );
+}
+
+async function resolveMetaTemplateType(
+  tm: ReturnType<typeof getTagManagerClient>,
+  parent: string,
+  accessToken: string
+): Promise<string> {
+  return resolveGalleryTemplateType(
+    tm, parent,
+    "facebook", "GoogleTagManager-WebTemplate-For-FacebookPixel",
+    (t) => t.galleryReference?.owner?.toLowerCase() === "facebook" ||
+            t.name?.toLowerCase().includes("facebook") ||
+            t.name?.toLowerCase().includes("pixel"),
+    accessToken
+  );
 }
 
 export async function deployCampaignTags(
@@ -512,67 +560,50 @@ export async function deployCampaignTags(
     let parameters: TagParam[] = [];
 
     if (pt.platform === "ga4") {
-      // Native GTM template: Google Analytics GA4 Event (type: gaawe)
+      // Native GTM tag type for GA4 Event. Only essential parameters — empty LIST params
+      // (eventParameters, userProperties) cause GTM version validation to fail.
       tagType = "gaawe";
       parameters = [
-        { type: "TEMPLATE", key: "measurementId", value: pt.tagId },   // G-XXXXXXXXXX
-        { type: "TEMPLATE", key: "eventName",     value: pt.eventName },
-        { type: "BOOLEAN",  key: "sendEcommerceData",     value: "false" },
-        { type: "TEMPLATE", key: "getEcommerceDataFrom",  value: "dataLayer" },
-        { type: "LIST",     key: "eventParameters",       list: [] },
-        { type: "LIST",     key: "userProperties",        list: [] },
+        { type: "TEMPLATE", key: "measurementIdOverride", value: pt.tagId },
+        { type: "TEMPLATE", key: "eventName",             value: pt.eventName },
       ];
 
     } else if (pt.platform === "google_ads") {
-      // Native GTM template: Google Ads Conversion Tracking (type: adwords_conversion)
-      // tagId format expected: "AW-123456789" or "AW-123456789/ConvLabel"
-      const stripped = pt.tagId.replace(/^AW-/i, "");
+      // Google Ads Conversion Tracking. tagId: "AW-123456789" or "AW-123456789/Label"
+      const stripped = pt.tagId.trim().replace(/^AW-/i, "");
       const [convId, convLabel] = stripped.split("/");
-      tagType = "adwords_conversion";
+      tagType = "awct";
       parameters = [
-        { type: "TEMPLATE", key: "conversionId",    value: convId },
+        { type: "INTEGER",  key: "conversionId",    value: convId },
         { type: "TEMPLATE", key: "conversionLabel", value: convLabel || pt.eventName },
         { type: "TEMPLATE", key: "conversionValue", value: "0" },
         { type: "TEMPLATE", key: "currencyCode",    value: "USD" },
-        { type: "BOOLEAN",  key: "remarketing_only", value: "false" },
       ];
 
     } else if (pt.platform === "meta") {
-      // Custom HTML — Meta Pixel has no native GTM template available via the API
-      const html = `<script>
-!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-fbq('init',${JSON.stringify(pt.tagId)});
-fbq('track',${JSON.stringify(pt.eventName)});
-<\/script>`;
-      parameters = [{ type: "TEMPLATE", key: "html", value: html }];
+      // Facebook Pixel community template — galleryOwner: facebook
+      tagType = await resolveMetaTemplateType(tm, parent, accessToken);
+      parameters = [
+        { type: "TEMPLATE", key: "pixelId",             value: pt.tagId },
+        { type: "BOOLEAN",  key: "enhancedEcommerce",   value: "false" },
+        { type: "BOOLEAN",  key: "useGA4Ecommerce",     value: "false" },
+        { type: "TEMPLATE", key: "eventName",           value: "standard" },
+        { type: "TEMPLATE", key: "standardEventName",   value: pt.eventName },
+        { type: "TEMPLATE", key: "consent",             value: "true" },
+        { type: "BOOLEAN",  key: "advancedMatching",    value: "false" },
+        { type: "BOOLEAN",  key: "disableAutoConfig",   value: "false" },
+        { type: "BOOLEAN",  key: "disablePushState",    value: "false" },
+      ];
 
     } else if (pt.platform === "mixpanel") {
-      // Use the official Mixpanel GTM gallery template (owner: mixpanel, repo: mixpanel-for-gtm).
-      // Import it into the workspace if not already present, then use cvt_{templateId} as the tag type.
-      const mpTemplateId = await getOrImportMixpanelTemplate(tm, parent);
-
-      if (mpTemplateId) {
-        tagType = `cvt_${mpTemplateId}`;
-        parameters = [
-          { type: "TEMPLATE", key: "projectToken",    value: pt.tagId },
-          { type: "TEMPLATE", key: "trackEventName",  value: pt.eventName },
-          { type: "BOOLEAN",  key: "trackPageView",   value: "false" },
-        ];
-      } else {
-        // Gallery import failed — fall back to Custom HTML with direct HTTP API
-        const html = `<script>
-(function(){try{
-  var t=${JSON.stringify(pt.tagId)},ev=${JSON.stringify(pt.eventName)},did;
-  try{var s=JSON.parse(localStorage.getItem('mp_'+t+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
-  if(!did){did='a'+Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem('mp_'+t+'_mixpanel',JSON.stringify({distinct_id:did,$device_id:did}));}catch(e){}}
-  var p={token:t,distinct_id:did,time:Math.floor(Date.now()/1000),$current_url:location.href,$pathname:location.pathname,$referrer:document.referrer||''};
-  var b='data='+encodeURIComponent(btoa(JSON.stringify([{event:ev,properties:p}])))+'&ip=1&verbose=1';
-  if(navigator.sendBeacon){navigator.sendBeacon('https://api.mixpanel.com/track',new Blob([b],{type:'application/x-www-form-urlencoded'}));}
-  else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(b);}
-}catch(e){}})();
-<\/script>`;
-        parameters = [{ type: "TEMPLATE", key: "html", value: html }];
-      }
+      // Mixpanel community template — galleryOwner: mixpanel
+      // Parameter keys sourced directly from template.tpl in workspace (templateId 61)
+      tagType = await resolveMixpanelTemplateType(tm, parent, accessToken);
+      parameters = [
+        { type: "TEMPLATE", key: "token",          value: pt.tagId },
+        { type: "TEMPLATE", key: "type",           value: "track" },
+        { type: "TEMPLATE", key: "trackEventName", value: pt.eventName },
+      ];
     }
 
     const tagRes = await tm.accounts.containers.workspaces.tags.create({
@@ -614,6 +645,9 @@ export async function createFunnelTagsInGTM(
   const parent = `accounts/${accountId}/containers/${containerId}/workspaces/${freshId}`;
   const createdTags = [];
 
+  // Resolve Mixpanel template type once — reused for every step
+  const mixpanelTagType = await resolveMixpanelTemplateType(tagmanager, parent, accessToken);
+
   for (const step of steps) {
     const triggerRes = await tagmanager.accounts.containers.workspaces.triggers.create({
       parent,
@@ -634,28 +668,16 @@ export async function createFunnelTagsInGTM(
 
     const triggerId = triggerRes.data.triggerId!;
 
-    const tagBody = `<script>
-(function(){
-  try{
-    var token=${JSON.stringify(mixpanelToken)};
-    var ev=${JSON.stringify(step.eventName)};
-    var did;
-    try{var s=JSON.parse(localStorage.getItem('mp_'+token+'_mixpanel')||'{}');did=s.distinct_id||s.$device_id;}catch(e){}
-    if(!did){did='a'+Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem('mp_'+token+'_mixpanel',JSON.stringify({distinct_id:did,$device_id:did}));}catch(e){}}
-    var props={token:token,distinct_id:did,time:Math.floor(Date.now()/1000),funnel:${JSON.stringify(funnelName)},step:${JSON.stringify(step.name)},$current_url:window.location.href,$pathname:window.location.pathname};
-    var body='data='+encodeURIComponent(btoa(JSON.stringify([{event:ev,properties:props}])))+'&ip=1&verbose=1';
-    if(navigator.sendBeacon){navigator.sendBeacon('https://api.mixpanel.com/track',new Blob([body],{type:'application/x-www-form-urlencoded'}));}
-    else{var x=new XMLHttpRequest();x.open('POST','https://api.mixpanel.com/track',true);x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');x.send(body);}
-  }catch(e){}
-})();
-</script>`;
-
     const tagRes = await tagmanager.accounts.containers.workspaces.tags.create({
       parent,
       requestBody: {
         name: `Tag - ${funnelName} - ${step.name}`,
-        type: "html",
-        parameter: [{ type: "TEMPLATE", key: "html", value: tagBody }],
+        type: mixpanelTagType,
+        parameter: [
+          { type: "TEMPLATE", key: "token",          value: mixpanelToken },
+          { type: "TEMPLATE", key: "type",           value: "track" },
+          { type: "TEMPLATE", key: "trackEventName", value: step.eventName },
+        ],
         firingTriggerId: [triggerId],
       },
     });
@@ -665,6 +687,7 @@ export async function createFunnelTagsInGTM(
       tagId: tagRes.data.tagId,
       triggerId,
       step: step.name,
+      tagType: "mixpanel",
     });
   }
 

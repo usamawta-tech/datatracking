@@ -969,6 +969,14 @@ function Step5Deploy({
   const [results, setResults]           = useState<DeployResult[] | null>(null);
   const [campaigns, setCampaigns]       = useState(initialCampaigns);
 
+  const CAM_PAGE_SIZE = 5;
+  const [camPage, setCamPage]                 = useState(0);
+  const [editCamId, setEditCamId]             = useState<string | null>(null);
+  const [editCamName, setEditCamName]         = useState("");
+  const [savingCam, setSavingCam]             = useState(false);
+  const [confirmDelCamId, setConfirmDelCamId] = useState<string | null>(null);
+  const [deletingCam, setDeletingCam]         = useState(false);
+
   const pagesWithTags = funnelPages.filter((p) => p.tags.some((t) => t.enabled));
   const totalTags = pagesWithTags.reduce((s, p) => s + p.tags.filter((t) => t.enabled).length, 0);
 
@@ -1012,7 +1020,40 @@ function Step5Deploy({
     setDeploying(false);
   }
 
-  const allSuccess = results?.every((r) => r.success);
+  async function deleteCampaign(id: string) {
+    setDeletingCam(true);
+    const res = await fetch(`/api/campaigns/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      setCampaigns((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        setCamPage((p) => Math.min(p, Math.max(0, Math.ceil(next.length / CAM_PAGE_SIZE) - 1)));
+        return next;
+      });
+    }
+    setConfirmDelCamId(null);
+    setDeletingCam(false);
+  }
+
+  async function saveCampaignName(id: string) {
+    if (!editCamName.trim()) return;
+    setSavingCam(true);
+    const res = await fetch(`/api/campaigns/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editCamName.trim() }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, name: data.campaign.name } : c)));
+      setEditCamId(null);
+      setEditCamName("");
+    }
+    setSavingCam(false);
+  }
+
+  const camTotalPages  = Math.ceil(campaigns.length / CAM_PAGE_SIZE);
+  const pageCampaigns  = campaigns.slice(camPage * CAM_PAGE_SIZE, (camPage + 1) * CAM_PAGE_SIZE);
+  const allSuccess     = results?.every((r) => r.success);
 
   return (
     <div className="space-y-6">
@@ -1124,36 +1165,143 @@ function Step5Deploy({
       {/* Previous campaigns */}
       {campaigns.length > 0 && (
         <div className="pt-4 border-t border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Previous Campaigns</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">Previous Campaigns</h3>
+            <span className="text-xs text-gray-400">{campaigns.length} total</span>
+          </div>
           <div className="rounded-2xl border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Page</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Page</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tags</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Tags</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {campaigns.map((c) => {
+                {pageCampaigns.map((c) => {
                   let tagCount = 0;
                   try { const p = JSON.parse(c.tags); tagCount = Array.isArray(p) ? p.length : 0; } catch { /* noop */ }
+                  const isEditing    = editCamId === c.id;
+                  const isConfirming = confirmDelCamId === c.id;
                   return (
-                    <tr key={c.id}>
-                      <td className="px-4 py-3 text-gray-900 font-medium text-sm">{c.name}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[160px] truncate">{c.pageUrl}</td>
+                    <tr key={c.id} className="group">
+                      <td className="px-4 py-3">
+                        {isEditing ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              autoFocus
+                              className="flex-1 text-sm border border-indigo-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-0"
+                              value={editCamName}
+                              onChange={(e) => setEditCamName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveCampaignName(c.id);
+                                if (e.key === "Escape") { setEditCamId(null); setEditCamName(""); }
+                              }}
+                            />
+                            <button
+                              onClick={() => saveCampaignName(c.id)}
+                              disabled={savingCam}
+                              className="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 shrink-0"
+                            >
+                              {savingCam ? "…" : "Save"}
+                            </button>
+                            <button
+                              onClick={() => { setEditCamId(null); setEditCamName(""); }}
+                              className="text-xs text-gray-500 hover:text-gray-700 px-1 shrink-0"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : isConfirming ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-red-600 font-medium">Delete this campaign?</span>
+                            <button
+                              onClick={() => deleteCampaign(c.id)}
+                              disabled={deletingCam}
+                              className="text-xs font-semibold text-white bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              {deletingCam ? "Deleting…" : "Delete"}
+                            </button>
+                            <button
+                              onClick={() => setConfirmDelCamId(null)}
+                              className="text-xs font-medium text-gray-500 hover:text-gray-700"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-900 font-medium text-sm">{c.name}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[160px] truncate hidden sm:table-cell">{c.pageUrl}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${c.status === "deployed" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
                           {c.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{tagCount}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs hidden sm:table-cell">{tagCount}</td>
+                      <td className="px-4 py-3 text-right">
+                        {!isEditing && !isConfirming && (
+                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => { setEditCamId(c.id); setEditCamName(c.name); setConfirmDelCamId(null); }}
+                              title="Rename"
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => { setConfirmDelCamId(c.id); setEditCamId(null); }}
+                              title="Delete"
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-all"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+
+            {/* Pagination */}
+            {camTotalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+                <span className="text-xs text-gray-400">
+                  {camPage * CAM_PAGE_SIZE + 1}–{Math.min((camPage + 1) * CAM_PAGE_SIZE, campaigns.length)} of {campaigns.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCamPage((p) => Math.max(0, p - 1))}
+                    disabled={camPage === 0}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <span className="text-xs text-gray-500 px-2 font-medium">{camPage + 1} / {camTotalPages}</span>
+                  <button
+                    onClick={() => setCamPage((p) => Math.min(camTotalPages - 1, p + 1))}
+                    disabled={camPage >= camTotalPages - 1}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

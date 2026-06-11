@@ -58,6 +58,21 @@ export async function POST(
       },
     });
 
+    await Promise.all(
+      result.tags.map((t) =>
+        prisma.generatedTag.create({
+          data: {
+            userId: session.userId,
+            name: t.name,
+            tagType: t.platform,
+            gtmTagId: t.gtmTagId,
+            config: JSON.stringify(t),
+            status: "published",
+          },
+        })
+      )
+    );
+
     return NextResponse.json({ success: true, tags: result.tags });
   } catch (e) {
     console.error("[campaigns/deploy]", e);
@@ -70,7 +85,7 @@ export async function POST(
       }
       return e instanceof Error ? e.message : "Deployment failed";
     })();
-    const status = /workspace|submitted|GTM/i.test(apiMsg) ? 422 : 500;
-    return NextResponse.json({ error: apiMsg }, { status });
+    // Always return 422 so the client receives the JSON body with the real error message
+    return NextResponse.json({ error: apiMsg }, { status: 422 });
   }
 }

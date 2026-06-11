@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
             funnelId: funnel.id,
             gtmTagId: t.tagId ?? undefined,
             name: t.name ?? `Tag - ${t.step}`,
-            tagType: "html",
+            tagType: t.tagType ?? "mixpanel",
             triggerName: `Trigger - ${funnel.name} - ${t.step}`,
             config: JSON.stringify(t),
             status: "published",

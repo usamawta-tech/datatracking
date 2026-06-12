@@ -265,3 +265,4 @@ async function shot(page, name) {
     .slice(-12)
     .forEach(f => console.log("  📸", f));
 })();
+

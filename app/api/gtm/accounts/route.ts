@@ -17,7 +17,7 @@ export async function GET() {
       refreshToken: conn.refreshToken ?? null,
       expiresAt: conn.expiresAt ?? null,
     });
-    const accounts = await listAccounts(accessToken, conn.refreshToken);
+    const accounts = await listAccounts(accessToken);
     if (!accounts.length) {
       return NextResponse.json({ error: "No GTM accounts found. Make sure the Google account you connected has access to Google Tag Manager." }, { status: 404 });
     }

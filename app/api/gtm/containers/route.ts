@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const accessToken = await getValidAccessToken({ userId: session.userId, accessToken: conn.accessToken, refreshToken: conn.refreshToken ?? null, expiresAt: conn.expiresAt ?? null });
-    const containers = await listContainers(accountId, accessToken, conn.refreshToken);
+    const containers = await listContainers(accountId, accessToken);
     return NextResponse.json({
       containers: containers.map((c: { containerId?: string | null; name?: string | null }) => ({ containerId: c.containerId, name: c.name })),
     });
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const accessToken = await getValidAccessToken({ userId: session.userId, accessToken: conn.accessToken, refreshToken: conn.refreshToken ?? null, expiresAt: conn.expiresAt ?? null });
-    const tm = getTagManagerClient(accessToken, conn.refreshToken);
+    const tm = getTagManagerClient(accessToken);
     const res = await tm.accounts.containers.create({
       parent: `accounts/${accountId}`,
       requestBody: { name, usageContext: ["web"] },

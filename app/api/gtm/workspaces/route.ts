@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const accessToken = await getValidAccessToken({ userId: session.userId, accessToken: conn.accessToken, refreshToken: conn.refreshToken ?? null, expiresAt: conn.expiresAt ?? null });
-    const workspaces = await listWorkspaces(accountId, containerId, accessToken, conn.refreshToken);
+    const workspaces = await listWorkspaces(accountId, containerId, accessToken);
     return NextResponse.json({
       workspaces: workspaces.map((w: { workspaceId?: string | null; name?: string | null }) => ({ workspaceId: w.workspaceId, name: w.name })),
     });

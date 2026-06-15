@@ -1,29 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOAuth2Client } from "@/lib/gtm";
-import { oauth2 } from "@googleapis/oauth2";
+import { exchangeCodeForTokens } from "@/lib/gtm";
 import { encrypt, SESSION_COOKIE, SESSION_MAX_AGE } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   if (!code) return NextResponse.redirect(new URL("/login?error=no_code", appUrl));
 
   try {
-    const client = createOAuth2Client();
-    const { tokens } = await client.getToken(code);
-    client.setCredentials(tokens);
-    console.log("token", tokens.access_token);
+    const tokens = await exchangeCodeForTokens(code);
 
-    const oauth2Client = oauth2({ version: "v2", auth: client });
-    const { data: googleUser } = await oauth2Client.userinfo.get();
+    // Fetch user info via native fetch — no google-auth-library needed
+    const userinfoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const googleUser = await userinfoRes.json() as { email?: string; name?: string };
 
     if (!googleUser.email) {
       return NextResponse.redirect(new URL("/login?error=no_email", appUrl));
     }
 
-    // Find or create the user
     let user = await prisma.user.findUnique({ where: { email: googleUser.email } });
 
     if (!user) {
@@ -42,24 +40,21 @@ export async function GET(req: NextRequest) {
       user = { ...user, emailVerified: new Date() };
     }
 
-    // Store GTM tokens
     await prisma.gtmConnection.upsert({
       where: { userId: user.id },
       update: {
-        accessToken: tokens.access_token!,
+        accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token ?? undefined,
         expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
       },
       create: {
         userId: user.id,
-        accessToken: tokens.access_token!,
+        accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token ?? undefined,
         expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
       },
     });
 
-    // Build session token and attach it directly to the redirect response
-    // (cookies() utility doesn't survive NextResponse.redirect in a Route Handler)
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE);
     const sessionToken = await encrypt({ userId: user.id, email: user.email, expiresAt });
 

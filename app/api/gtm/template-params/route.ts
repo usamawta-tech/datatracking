@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     expiresAt: conn.expiresAt ?? null,
   });
 
-  const tm = getTagManagerClient(accessToken, conn.refreshToken);
+  const tm = getTagManagerClient(accessToken);
   const parent = `accounts/${conn.selectedAccountId}/containers/${conn.selectedContainerId}/workspaces/${conn.selectedWorkspaceId}`;
 
   const listRes = await tm.accounts.containers.workspaces.templates.list({ parent });

@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "postgenerate": "node scripts/patch-prisma-wasm.mjs",
+    "build": "prisma generate && node scripts/patch-prisma-wasm.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "deploy": "prisma generate && opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "deploy": "prisma generate && node scripts/patch-prisma-wasm.mjs && opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@googleapis/tagmanager": "^15.0.0",

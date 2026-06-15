@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     const accessToken = await getValidAccessToken({ userId: session.userId, accessToken: conn.accessToken, refreshToken: conn.refreshToken ?? null, expiresAt: conn.expiresAt ?? null });
     const containers = await listContainers(accountId, accessToken, conn.refreshToken);
     return NextResponse.json({
-      containers: containers.map((c: { containerId?: string | null; name?: string | null }) => ({ containerId: c.containerId, name: c.name })),
+      containers: containers.map((c) => ({ containerId: c.containerId, name: c.name })),
     });
   } catch (e) {
     console.error("[gtm/containers]", e);

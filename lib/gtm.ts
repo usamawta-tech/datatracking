@@ -1,5 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
-import { tagmanager } from "@googleapis/tagmanager";
+import { google } from "googleapis";
 import { prisma } from "@/lib/db";
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -84,7 +84,7 @@ export function getTagManagerClient(accessToken: string, refreshToken?: string |
     access_token: accessToken,
     refresh_token: refreshToken ?? undefined,
   });
-  return tagmanager({ version: "v2", auth: client });
+  return google.tagmanager({ version: "v2", auth: client });
 }
 
 export async function listAccounts(accessToken: string, refreshToken?: string | null) {

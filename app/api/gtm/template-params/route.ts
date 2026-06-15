@@ -27,8 +27,8 @@ export async function GET(req: NextRequest) {
     name:              t.name,
     templateId:        t.templateId,
     galleryTemplateId: (t.galleryReference as Record<string, unknown>)?.galleryTemplateId,
-    galleryOwner:      (t.galleryReference as Record<string, unknown>)?.owner,
-    galleryRepo:       (t.galleryReference as Record<string, unknown>)?.repository,
+    galleryOwner:      t.galleryReference?.owner,
+    galleryRepo:       t.galleryReference?.repository,
     // Parse parameter keys from templateData
     parameterKeys: (() => {
       try {

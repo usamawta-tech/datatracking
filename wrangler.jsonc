@@ -1,0 +1,13 @@
+{
+  "name": "ai-tracker",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ai-tracker-db",
+      "database_id": "eadf54b3-6925-47bb-8f25-980f9f89352f"
+    }
+  ]
+}

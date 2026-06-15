@@ -1,6 +1,9 @@
 {
   "name": "ai-tracker",
   "main": ".open-next/worker.js",
+  "rules": [
+    { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
+  ],
   "compatibility_date": "2024-09-23",
   "compatibility_flags": ["nodejs_compat"],
   "minify": true,

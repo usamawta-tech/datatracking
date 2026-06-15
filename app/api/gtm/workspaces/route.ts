@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const accessToken = await getValidAccessToken({ userId: session.userId, accessToken: conn.accessToken, refreshToken: conn.refreshToken ?? null, expiresAt: conn.expiresAt ?? null });
     const workspaces = await listWorkspaces(accountId, containerId, accessToken, conn.refreshToken);
     return NextResponse.json({
-      workspaces: workspaces.map((w) => ({ workspaceId: w.workspaceId, name: w.name })),
+      workspaces: workspaces.map((w: { workspaceId?: string | null; name?: string | null }) => ({ workspaceId: w.workspaceId, name: w.name })),
     });
   } catch (e) {
     console.error("[gtm/workspaces]", e);

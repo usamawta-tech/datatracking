@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createOAuth2Client } from "@/lib/gtm";
-import { google } from "googleapis";
+import { oauth2 } from "@googleapis/oauth2";
 import { encrypt, SESSION_COOKIE, SESSION_MAX_AGE } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
@@ -16,8 +16,8 @@ export async function GET(req: NextRequest) {
     client.setCredentials(tokens);
     console.log("token", tokens.access_token);
 
-    const oauth2 = google.oauth2({ version: "v2", auth: client });
-    const { data: googleUser } = await oauth2.userinfo.get();
+    const oauth2Client = oauth2({ version: "v2", auth: client });
+    const { data: googleUser } = await oauth2Client.userinfo.get();
 
     if (!googleUser.email) {
       return NextResponse.redirect(new URL("/login?error=no_email", appUrl));

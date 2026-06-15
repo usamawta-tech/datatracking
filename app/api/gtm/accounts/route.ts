@@ -22,7 +22,7 @@ export async function GET() {
       return NextResponse.json({ error: "No GTM accounts found. Make sure the Google account you connected has access to Google Tag Manager." }, { status: 404 });
     }
     return NextResponse.json({
-      accounts: accounts.map((a) => ({ accountId: a.accountId, name: a.name })),
+      accounts: accounts.map((a: { accountId?: string | null; name?: string | null }) => ({ accountId: a.accountId, name: a.name })),
     });
   } catch (e) {
     console.error("[gtm/accounts]", e);

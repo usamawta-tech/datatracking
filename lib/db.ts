@@ -1,5 +1,4 @@
 import { PrismaClient } from "@/app/generated/prisma/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
 import path from "path";
 
 let _client: PrismaClient | null = null;
@@ -15,6 +14,9 @@ function getClient(): PrismaClient {
     const { env } = getCloudflareContext();
     _client = new PrismaClient({ adapter: new PrismaD1(env.DB) });
   } else {
+    // Dynamic require keeps @libsql/client out of the production bundle
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaLibSql } = require("@prisma/adapter-libsql");
     const dbUrl =
       process.env.DATABASE_URL ??
       `file:${path.join(process.cwd(), "prisma", "dev.db")}`;

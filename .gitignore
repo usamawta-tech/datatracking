@@ -50,6 +50,7 @@ next-env.d.ts
 
 # Local dev scripts and config
 /scripts/
+!/scripts/patch-prisma-wasm.mjs
 /.claude/
 
 .vercel

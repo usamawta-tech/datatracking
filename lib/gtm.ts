@@ -113,18 +113,83 @@ function gtmErrMsg(err: unknown): string {
   return String(err).toLowerCase();
 }
 
-// Minimal auth adapter — avoids google-auth-library's Node http module
-function makeAuth(accessToken: string) {
+// Fetch-based auth adapter for the googleapis client.
+// The googleapis client performs every API call via `auth.request(opts)`
+// (a gaxios-style interface). We implement it with native fetch so it works
+// in Cloudflare Workers without google-auth-library's Node `http` transport.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeAuth(accessToken: string): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function request(opts: any) {
+    const url = new URL(opts.url);
+    if (opts.params) {
+      for (const [k, v] of Object.entries(opts.params)) {
+        if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+      }
+    }
+
+    const headers: Record<string, string> = {
+      ...(opts.headers ?? {}),
+      Authorization: `Bearer ${accessToken}`,
+    };
+
+    let body: string | undefined;
+    if (opts.data !== undefined && opts.data !== null) {
+      body = typeof opts.data === "string" ? opts.data : JSON.stringify(opts.data);
+      if (!headers["Content-Type"] && !headers["content-type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+    } else if (opts.body !== undefined) {
+      body = opts.body;
+    }
+
+    const res = await fetch(url.toString(), {
+      method: (opts.method ?? "GET").toUpperCase(),
+      headers,
+      body,
+    });
+
+    const text = await res.text();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let data: any;
+    try {
+      data = text ? JSON.parse(text) : undefined;
+    } catch {
+      data = text;
+    }
+
+    if (res.status >= 400) {
+      // Shape matches GaxiosError so gtmErrMsg() can read err.response.data.error.message
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const err: any = new Error(`GTM API request failed with status ${res.status}`);
+      err.response = { data, status: res.status, statusText: res.statusText };
+      err.code = res.status;
+      throw err;
+    }
+
+    return {
+      data,
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries(res.headers),
+      config: opts,
+      request: { responseURL: url.toString() },
+    };
+  }
+
   return {
+    request,
     async getRequestHeaders() {
       return { Authorization: `Bearer ${accessToken}` };
+    },
+    async getAccessToken() {
+      return { token: accessToken };
     },
   };
 }
 
 export function getTagManagerClient(accessToken: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return tagmanager({ version: "v2", auth: makeAuth(accessToken) as any });
+  return tagmanager({ version: "v2", auth: makeAuth(accessToken) });
 }
 
 export async function listAccounts(accessToken: string) {

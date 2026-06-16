@@ -1,14 +1,17 @@
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "ai-tracker",
   "main": ".open-next/worker.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "minify": true,
   "rules": [
     { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
   ],
-  "compatibility_date": "2024-09-23",
-  "compatibility_flags": ["nodejs_compat"],
-  "minify": true,
   "vars": {
-    "APP_URL": "https://ai-tracker.usamawta.workers.dev"
+    "APP_URL": "https://ai-tracker.data-250.workers.dev",
+    "NEXT_PUBLIC_APP_URL": "https://ai-tracker.data-250.workers.dev",
+    "RESEND_FROM_EMAIL": "noreply@wetrackads.com"
   },
   "assets": {
     "directory": ".open-next/assets",
@@ -18,7 +21,24 @@
     {
       "binding": "DB",
       "database_name": "ai-tracker-db",
-      "database_id": "eadf54b3-6925-47bb-8f25-980f9f89352f"
+      "database_id": "b967aa05-3948-404f-b38d-b59c7881ea6a"
     }
-  ]
+  ],
+  
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  
+}
 }

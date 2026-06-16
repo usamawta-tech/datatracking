@@ -54,5 +54,6 @@ next-env.d.ts
 !/scripts/patch-prisma-wasm.mjs
 !/scripts/patch-worker-wasm.mjs
 /.claude/
+.wrangler/
 
 .vercel

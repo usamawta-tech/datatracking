@@ -1,7 +1,8 @@
 // Patches Prisma's generated class.ts so that in production (Cloudflare Workers)
-// the Wasm query compiler is loaded via WebAssembly.compileStreaming(fetch(url))
-// instead of new WebAssembly.Module(buffer), which is blocked by Cloudflare.
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "fs";
+// the Wasm query compiler is loaded from globalThis.__prisma_sqlite_wasm,
+// which is set by a static import in worker.js (the only way to get
+// WebAssembly.Module in CF Workers without dynamic compilation).
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -14,20 +15,33 @@ const wasmBase64File = path.join(
   "node_modules/@prisma/client/runtime/query_compiler_fast_bg.sqlite.wasm-base64.mjs"
 );
 const wasmDest = path.join(root, "public/_prisma/sqlite_query_compiler.wasm");
+const wasmPrisma = path.join(root, "prisma/sqlite_query_compiler.wasm");
 
-if (!existsSync(wasmDest)) {
-  const src = readFileSync(wasmBase64File, "utf8");
-  const match = src.match(/const wasm = "([^"]+)"/);
-  if (!match) throw new Error("[patch-prisma-wasm] Could not find base64 wasm string");
-  const buf = Buffer.from(match[1], "base64");
-  mkdirSync(path.dirname(wasmDest), { recursive: true });
-  writeFileSync(wasmDest, buf);
-  console.log(`[patch-prisma-wasm] Extracted ${buf.length} bytes → ${wasmDest}`);
+for (const dest of [wasmDest, wasmPrisma]) {
+  if (!existsSync(dest)) {
+    const src = readFileSync(wasmBase64File, "utf8");
+    const match = src.match(/const wasm = "([^"]+)"/);
+    if (!match) throw new Error("[patch-prisma-wasm] Could not find base64 wasm string");
+    const buf = Buffer.from(match[1], "base64");
+    mkdirSync(path.dirname(dest), { recursive: true });
+    writeFileSync(dest, buf);
+    console.log(`[patch-prisma-wasm] Extracted ${buf.length} bytes → ${dest}`);
+  }
 }
 
 // ── 2. Patch generated class.ts ───────────────────────────────────────────
 const classFile = path.join(root, "app/generated/prisma/internal/class.ts");
 let src = readFileSync(classFile, "utf8");
+
+if (src.includes("__prisma_sqlite_wasm")) {
+  console.log("[patch-prisma-wasm] Already patched, skipping.");
+  process.exit(0);
+}
+
+if (!src.includes("decodeBase64AsWasm")) {
+  console.warn("[patch-prisma-wasm] WARNING: expected function not found.");
+  process.exit(0);
+}
 
 const before = `async function decodeBase64AsWasm(wasmBase64: string): Promise<WebAssembly.Module> {
   const { Buffer } = await import('node:buffer')
@@ -35,29 +49,17 @@ const before = `async function decodeBase64AsWasm(wasmBase64: string): Promise<W
   return new WebAssembly.Module(wasmArray)
 }`;
 
+// In CF Workers, globalThis.__prisma_sqlite_wasm is set by a static import
+// in worker.js (processed by wrangler as CompiledWasm). For local dev,
+// fall back to the standard new WebAssembly.Module(buffer) path.
 const after = `async function decodeBase64AsWasm(wasmBase64: string): Promise<WebAssembly.Module> {
-  // In Cloudflare Workers, new WebAssembly.Module(buffer) is blocked.
-  // Use compileStreaming(fetch(url)) with the .wasm served as a static asset.
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (process.env.NODE_ENV === 'production' && appUrl) {
-    const wasmUrl = \`\${appUrl}/_prisma/sqlite_query_compiler.wasm\`;
-    const response = await fetch(wasmUrl);
-    return WebAssembly.compileStreaming(response);
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const precompiled = (globalThis as any).__prisma_sqlite_wasm;
+  if (precompiled) return precompiled;
   const { Buffer } = await import('node:buffer');
   const wasmArray = Buffer.from(wasmBase64, 'base64');
   return new WebAssembly.Module(wasmArray);
 }`;
 
-if (src.includes("sqlite_query_compiler.wasm")) {
-  console.log("[patch-prisma-wasm] Already patched, skipping.");
-  process.exit(0);
-}
-
-if (!src.includes("decodeBase64AsWasm")) {
-  console.warn("[patch-prisma-wasm] WARNING: expected function not found — Prisma may have changed.");
-  process.exit(0);
-}
-
 writeFileSync(classFile, src.replace(before, after), "utf8");
-console.log("[patch-prisma-wasm] Patched decodeBase64AsWasm in", classFile);
+console.log("[patch-prisma-wasm] Patched decodeBase64AsWasm to use globalThis.__prisma_sqlite_wasm");

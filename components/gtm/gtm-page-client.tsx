@@ -267,7 +267,7 @@ export function GtmPageClient({
                         }
                         setLoading(false);
                       }}
-                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 [&>option]:bg-white [&>option]:text-gray-900"
                     >
                       <option value="">Select account…</option>
                       {accounts.map((a) => (
@@ -303,7 +303,7 @@ export function GtmPageClient({
                             }
                             setLoading(false);
                           }}
-                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 [&>option]:bg-white [&>option]:text-gray-900"
                         >
                           <option value="">Select container…</option>
                           {containers.map((c) => (
@@ -326,7 +326,7 @@ export function GtmPageClient({
                         <select
                           value={selWorkspace}
                           onChange={(e) => setSelWorkspace(e.target.value)}
-                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 [&>option]:bg-white [&>option]:text-gray-900"
                         >
                           <option value="">Select workspace…</option>
                           {workspaces.map((w) => (

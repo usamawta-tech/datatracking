@@ -3,83 +3,32 @@ import { exchangeCodeForTokens } from "@/lib/gtm";
 import { encrypt, SESSION_COOKIE, SESSION_MAX_AGE } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
-const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://ai-tracker.usamawta.workers.dev";
 
 export async function GET(req: NextRequest) {
-  const step = { current: "init" };
-  const start = Date.now();
-
-  const log = (msg: string, data?: unknown) => {
-    const elapsed = Date.now() - start;
-    console.log(`[gtm/callback] [${elapsed}ms] [${step.current}] ${msg}`, data ?? "");
-  };
-
   const code = req.nextUrl.searchParams.get("code");
-  const error = req.nextUrl.searchParams.get("error");
-
-  log("request received", { hasCode: !!code, error, appUrl });
-
-  if (error) {
-    log("Google returned an error", { error });
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(error)}`, appUrl));
-  }
-
-  if (!code) {
-    log("no code in query params");
-    return NextResponse.redirect(new URL("/login?error=no_code", appUrl));
-  }
+  if (!code) return NextResponse.redirect(new URL("/login?error=no_code", appUrl));
 
   try {
-    // ── 1. Exchange code for tokens ──────────────────────────────────────────
-    step.current = "token_exchange";
-    log("exchanging code for tokens");
+    const tokens = await exchangeCodeForTokens(code);
+    console.log(tokens);
 
-    let tokens: Awaited<ReturnType<typeof exchangeCodeForTokens>>;
-    try {
-      tokens = await exchangeCodeForTokens(code);
-      log("tokens received", {
-        hasAccessToken: !!tokens.access_token,
-        hasRefreshToken: !!tokens.refresh_token,
-        expiryDate: tokens.expiry_date,
-      });
-    } catch (e) {
-      log("token exchange failed", { error: String(e) });
-      throw e;
-    }
-
-    // ── 2. Fetch user info ────────────────────────────────────────────────────
-    step.current = "userinfo";
-    log("fetching user info from Google");
-
+    // Fetch user info via native fetch — no google-auth-library needed
     const userinfoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-
-    log("userinfo response", { status: userinfoRes.status, ok: userinfoRes.ok });
-
-    if (!userinfoRes.ok) {
-      const body = await userinfoRes.text();
-      log("userinfo request failed", { status: userinfoRes.status, body });
-      throw new Error(`Userinfo request failed: ${userinfoRes.status} ${body}`);
-    }
-
+    console.log(userinfoRes);
     const googleUser = await userinfoRes.json() as { email?: string; name?: string };
-    log("user info received", { email: googleUser.email, name: googleUser.name });
+    console.log(googleUser);
 
     if (!googleUser.email) {
-      log("no email in user info");
+      console.log("email not found")
       return NextResponse.redirect(new URL("/login?error=no_email", appUrl));
     }
 
-    // ── 3. Find or create user ────────────────────────────────────────────────
-    step.current = "db_user";
-    log("looking up user in DB", { email: googleUser.email });
-
     let user = await prisma.user.findUnique({ where: { email: googleUser.email } });
-    log("DB lookup result", { found: !!user, emailVerified: user?.emailVerified });
 
     if (!user) {
-      log("creating new user");
       user = await prisma.user.create({
         data: {
           email: googleUser.email,
@@ -87,19 +36,13 @@ export async function GET(req: NextRequest) {
           emailVerified: new Date(),
         },
       });
-      log("user created", { id: user.id });
     } else if (!user.emailVerified) {
-      log("marking existing user email as verified");
       await prisma.user.update({
         where: { id: user.id },
         data: { emailVerified: new Date() },
       });
       user = { ...user, emailVerified: new Date() };
     }
-
-    // ── 4. Store GTM tokens ───────────────────────────────────────────────────
-    step.current = "db_gtm_tokens";
-    log("upserting GTM connection", { userId: user.id });
 
     await prisma.gtmConnection.upsert({
       where: { userId: user.id },
@@ -115,22 +58,11 @@ export async function GET(req: NextRequest) {
         expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
       },
     });
-    log("GTM connection saved");
-
-    // ── 5. Create session ─────────────────────────────────────────────────────
-    step.current = "session";
-    log("creating session token");
 
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE);
     const sessionToken = await encrypt({ userId: user.id, email: user.email, expiresAt });
-    log("session token created");
 
-    // ── 6. Redirect ───────────────────────────────────────────────────────────
-    step.current = "redirect";
-    const redirectUrl = new URL("/gtm?connected=1", appUrl);
-    log("redirecting", { to: redirectUrl.toString() });
-
-    const response = NextResponse.redirect(redirectUrl);
+    const response = NextResponse.redirect(new URL("/gtm?connected=1", appUrl));
     response.cookies.set(SESSION_COOKIE, sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -139,11 +71,10 @@ export async function GET(req: NextRequest) {
       path: "/",
     });
 
-    log("done", { totalMs: Date.now() - start });
     return response;
 
   } catch (e) {
-    console.error(`[gtm/callback] FAILED at step="${step.current}" after ${Date.now() - start}ms`, e);
+    console.error("GTM OAuth callback error:", e);
     const msg = encodeURIComponent(e instanceof Error ? e.message : String(e));
     return NextResponse.redirect(new URL(`/login?error=${msg}`, appUrl));
   }
